@@ -753,7 +753,7 @@ def main():
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
-            MessageHandler(filters.Regex("^Мои заявки$"), exit_to_my_requests),
+            MessageHandler(filters.Regex("^📂 Мои заявки$"), exit_to_my_requests),
         ],
     )
 

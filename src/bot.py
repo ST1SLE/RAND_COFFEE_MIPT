@@ -432,24 +432,20 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"{config['icon']} *{date_str}* в *{time_str}*\n{details_str}"
         )
 
-        if config["show_cancel_button"] and user_id == req["creator_user_id"]:
-            cancel_button = InlineKeyboardButton(
-                f"❌ Отменить кофе-мит в {req["shop_name"]} в {time_str}",
-                callback_data=f"cancel_{req['request_id']}",
-            )
-            keyboard_rows.append([cancel_button])
-
-        cancel_button = None
+        button_to_add = None
         if status == "pending" and user_id == req["creator_user_id"]:
-            cancel_button = InlineKeyboardButton(
+            button_to_add = InlineKeyboardButton(
                 f"❌ Отменить заявку в «{req['shop_name']}»",
                 callback_data=f"cancel_{req['request_id']}",
             )
         elif status == "matched" and user_id == req["partner_user_id"]:
-            cancel_button = InlineKeyboardButton(
+            button_to_add = InlineKeyboardButton(
                 f"❌ Отказаться от встречи в «{req['shop_name']}»",
                 callback_data=f"unmatch_{req['request_id']}",
             )
+
+        if button_to_add:
+            keyboard_rows.append([button_to_add])
 
     if cancel_button:
         keyboard_rows.append([cancel_button])
@@ -763,7 +759,7 @@ def main():
 
     requests_conv_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex("^📂 Мои заявки$"), my_requests_start),
+            MessageHandler(filters.Regex("^📂 Мои заявки"), my_requests_start),
             CommandHandler("my_coffee_requests", my_requests_start),
         ],
         states={

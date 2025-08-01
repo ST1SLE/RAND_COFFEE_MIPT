@@ -35,6 +35,7 @@ from db import (
     get_meetings_for_reminder,
     mark_reminder_as_sent,
     expire_pending_requests,
+    unmatch_request,
 )
 
 load_dotenv()
@@ -725,7 +726,7 @@ def main():
 
     conv_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex("^Найти компанию ☕️$"), find_company_start),
+            MessageHandler(filters.Regex("^☕️ Найти компанию$"), find_company_start),
             CommandHandler("find", find_company_start),
         ],
         states={
@@ -762,7 +763,7 @@ def main():
 
     requests_conv_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex("^Мои заявки$"), my_requests_start),
+            MessageHandler(filters.Regex("^📂 Мои заявки$"), my_requests_start),
             CommandHandler("my_coffee_requests", my_requests_start),
         ],
         states={
@@ -781,7 +782,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
 
-    app.add_handler(MessageHandler(filters.Regex("^Гайд$"), help_command))
+    app.add_handler(MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command))
 
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
     app.job_queue.run_repeating(expire_requests, interval=60, first=15)

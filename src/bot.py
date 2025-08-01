@@ -247,9 +247,9 @@ async def create_request_step3_time(
         return CHOOSING_DATE
 
     context.user_data["chosen_date"] = proposed_date
-    logger.info(
-        f"User {update.effective_user.id} chose date {proposed_date.strftime("%d.%m.%Y")}."
-    )
+    proposed_date_str = proposed_date.strftime("%d.%m.%Y")
+
+    logger.info(f"User {update.effective_user.id} chose date {proposed_date_str}.")
 
     await update.message.reply_text(
         "Отлично! ✅\n\n Теперь давай определимся со временем. Напиши, во сколько тебе удобно встретиться (например, *14:30*)."

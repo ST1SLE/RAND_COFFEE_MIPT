@@ -334,18 +334,6 @@ async def create_request_step4_validate(
         return CHOOSING_TIME
 
 
-async def exit_to_my_requests(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    await update.message.reply_text(
-        "Переключаюсь на твои заявки...⏳", reply_markup=ReplyKeyboardRemove()
-    )
-
-    await my_requests_start(update=update, context=context)
-
-    return ConversationHandler.END
-
-
 async def view_available_requests(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -724,6 +712,8 @@ def main():
         entry_points=[
             MessageHandler(filters.Regex("^☕️ Найти компанию$"), find_company_start),
             CommandHandler("find", find_company_start),
+            MessageHandler(filters.Regex("^📂 Мои заявки$"), my_requests_start),
+            CommandHandler("my_coffee_requests", my_requests_start),
         ],
         states={
             CHOOSING_ACTION: [
@@ -750,30 +740,15 @@ def main():
             CHOOSING_REQUEST: [
                 CallbackQueryHandler(handle_accept_request, pattern="^accept_")
             ],
-        },
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            MessageHandler(filters.Regex("^📂 Мои заявки$"), exit_to_my_requests),
-        ],
-    )
-
-    requests_conv_handler = ConversationHandler(
-        entry_points=[
-            MessageHandler(filters.Regex("^📂 Мои заявки"), my_requests_start),
-            CommandHandler("my_coffee_requests", my_requests_start),
-        ],
-        states={
             MANAGING_REQUESTS: [
                 CallbackQueryHandler(handle_cancel_request, pattern="^cancel_"),
                 CallbackQueryHandler(handle_unmatch_request, pattern="^unmatch_"),
-                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu_start$"),
-            ]
+            ],
         },
-        fallbacks=[CommandHandler("cancel", cancel), CommandHandler("start", start)],
+        fallbacks=[CommandHandler("cancel", cancel)],
     )
 
     app.add_handler(conv_handler)
-    app.add_handler(requests_conv_handler)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))

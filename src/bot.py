@@ -370,6 +370,13 @@ async def view_available_requests(
     return CHOOSING_REQUEST
 
 
+def escape_markdown(text: str) -> str:
+    escape_chars = r"_*[]()~`>#+-=|{}.!"
+    return text.replace("\\", "\\\\").translate(
+        str.maketrans({c: f"\\{c}" for c in escape_chars})
+    )
+
+
 async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
     requests = get_user_requests(user_id=user_id)
@@ -405,9 +412,11 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             username_to_mention = (
                 req["partner_username"] if is_creator else req["creator_username"]
             )
-            partner_mention = (
-                f"@{username_to_mention}" if username_to_mention else "партнером"
-            )
+            if username_to_mention:
+                safe_username = escape_markdown(username_to_mention)
+                partner_mention = f"@{safe_username}"
+            else:
+                partner_mention = "партнером"
 
         date_str = req["meet_time"].strftime("%d.%m.%Y")
         time_str = req["meet_time"].strftime("%H:%M")
@@ -434,9 +443,6 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
         if button_to_add:
             keyboard_rows.append([button_to_add])
-
-    if cancel_button:
-        keyboard_rows.append([cancel_button])
 
     keyboard_rows.append(
         [InlineKeyboardButton("⬅️ Назад в главное меню", url=start_url)]
@@ -746,6 +752,7 @@ def main():
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
     )
 
     app.add_handler(conv_handler)

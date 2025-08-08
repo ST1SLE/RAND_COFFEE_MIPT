@@ -2,7 +2,7 @@ import os
 import logging
 import subprocess
 import re
-from datetime import datetime, time
+from datetime import datetime, time, timezone, timedelta
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -36,11 +36,13 @@ from db import (
     mark_reminder_as_sent,
     expire_pending_requests,
     unmatch_request,
+    cancel_request_by_creator,
 )
 
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
+MOSCOW_TIMEZONE = timezone(timedelta(hours=3), name="Europe/Moscow")
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -100,9 +102,11 @@ async def show_main_menu_keyboard(
 
 async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
+
     await query.answer()
     await query.edit_message_reply_markup(reply_markup=None)
     await show_main_menu_keyboard(update, context, text="Главное меню:")
+
     return ConversationHandler.END
 
 
@@ -305,9 +309,10 @@ async def create_request_step4_validate(
 
     try:
         hour, minute = map(int, user_time_str.split(":"))
-        meet_time = chosen_date.replace(
+        naive_meet_time = chosen_date.replace(
             hour=hour, minute=minute, second=0, microsecond=0
         )
+        meet_time = naive_meet_time.replace(tzinfo=MOSCOW_TIMEZONE)
     except ValueError:
         await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
         return CHOOSING_TIME
@@ -356,8 +361,12 @@ async def view_available_requests(
 
     buttons = []
     for request_id, shop_name, meet_time in requests:
-        time_str = meet_time.strftime("%H:%M")
-        button_text = f"{shop_name} @ {time_str}"
+        meet_time_moscow = meet_time.astimezone(MOSCOW_TIMEZONE)
+
+        date_str = meet_time_moscow.strftime("%d.%m")
+        time_str = meet_time_moscow.strftime("%H:%M")
+
+        button_text = f"📍 {shop_name} - {date_str} @ {time_str}"
         buttons.append((button_text, f"accept_{request_id}"))
 
     reply_markup = build_inline_keyboard(buttons_data=buttons)
@@ -381,78 +390,78 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     user_id = update.effective_user.id
     requests = get_user_requests(user_id=user_id)
 
-    bot_username = "random_coffee_mipt_bot"
-    start_url = f"https://t.me/{bot_username}?start=start"
-    back_button_keyboard = [
-        [InlineKeyboardButton("⬅️ Назад в главное меню", url=start_url)]
-    ]
-    reply_markup = InlineKeyboardMarkup(back_button_keyboard)
-
-    if not requests:
-        await update.message.reply_text(
-            "У тебя пока нет запланированных или завершенных кофе-митов. "
-            "Время найти компанию! ☕️",
-            reply_markup=reply_markup,
-        )
-        return MANAGING_REQUESTS
-
-    message_parts = ["*Твои кофе-миты ☕️:*\n"]
     keyboard_rows = []
 
-    for req in requests:
-        status = req["status"]
-        if status not in STATUS_CONFIG:
-            continue
-
-        config = STATUS_CONFIG[status]
-
-        partner_mention = ""
-        if status == "matched":
-            is_creator = user_id == req["creator_user_id"]
-            username_to_mention = (
-                req["partner_username"] if is_creator else req["creator_username"]
-            )
-            if username_to_mention:
-                safe_username = escape_markdown(username_to_mention)
-                partner_mention = f"@{safe_username}"
-            else:
-                partner_mention = "партнером"
-
-        date_str = req["meet_time"].strftime("%d.%m.%Y")
-        time_str = req["meet_time"].strftime("%H:%M")
-
-        details_str = config["details_template"].format(
-            shop_name=req["shop_name"], partner_mention=partner_mention
+    if not requests:
+        message_text = (
+            "У тебя пока нет запланированных или завершенных кофе-митов. "
+            "Время найти компанию! ☕️"
         )
+    else:
+        message_parts = ["*Твои кофе-миты ☕️:*\n"]
 
-        message_parts.append(
-            f"{config['icon']} *{date_str}* в *{time_str}*\n{details_str}"
-        )
+        for req in requests:
+            status = req["status"]
+            if status not in STATUS_CONFIG:
+                continue
 
-        button_to_add = None
-        if status == "pending" and user_id == req["creator_user_id"]:
-            button_to_add = InlineKeyboardButton(
-                f"❌ Отменить заявку в «{req['shop_name']}»",
-                callback_data=f"cancel_{req['request_id']}",
+            config = STATUS_CONFIG[status]
+
+            partner_mention = ""
+            if status == "matched":
+                is_creator = user_id == req["creator_user_id"]
+                username_to_mention = (
+                    req["partner_username"] if is_creator else req["creator_username"]
+                )
+                if username_to_mention:
+                    safe_username = escape_markdown(username_to_mention)
+                    partner_mention = f"@{safe_username}"
+                else:
+                    partner_mention = "партнером"
+
+            meet_time_moscow = req["meet_time"].astimezone(MOSCOW_TIMEZONE)
+            date_str = meet_time_moscow.strftime("%d.%m.%Y")
+            time_str = meet_time_moscow.strftime("%H:%M")
+
+            details_str = config["details_template"].format(
+                shop_name=escape_markdown(req["shop_name"]),
+                partner_mention=partner_mention,
             )
-        elif status == "matched" and user_id == req["partner_user_id"]:
-            button_to_add = InlineKeyboardButton(
-                f"❌ Отказаться от встречи в «{req['shop_name']}»",
-                callback_data=f"unmatch_{req['request_id']}",
+
+            message_parts.append(
+                f"{config['icon']} *{date_str}* в *{time_str}*\n{details_str}"
             )
 
-        if button_to_add:
-            keyboard_rows.append([button_to_add])
+            button_to_add = None
+            if status == "pending" and user_id == req["creator_user_id"]:
+                button_to_add = InlineKeyboardButton(
+                    f"❌ Отменить заявку в «{req['shop_name']}»",
+                    callback_data=f"cancel_{req['request_id']}",
+                )
+            elif status == "matched":
+                if user_id == req["partner_user_id"]:
+                    button_to_add = InlineKeyboardButton(
+                        f"❌ Отказаться от встречи в «{req['shop_name']}»",
+                        callback_data=f"unmatch_{req['request_id']}",
+                    )
+                elif user_id == req["creator_user_id"]:
+                    button_to_add = InlineKeyboardButton(
+                        f"❌ Отменить встречу в «{req['shop_name']}»",
+                        callback_data=f"cancel_matched_{req['request_id']}",
+                    )
+
+            if button_to_add:
+                keyboard_rows.append([button_to_add])
+
+        message_text = "\n\n".join(message_parts)
 
     keyboard_rows.append(
-        [InlineKeyboardButton("⬅️ Назад в главное меню", url=start_url)]
+        [InlineKeyboardButton("⬅️ Назад в главное меню", callback_data="main_menu")]
     )
+
     reply_markup = InlineKeyboardMarkup(keyboard_rows)
-
-    final_message = "\n\n".join(message_parts)
-
     await update.message.reply_text(
-        final_message, parse_mode="Markdown", reply_markup=reply_markup
+        message_text, parse_mode="Markdown", reply_markup=reply_markup
     )
 
     return MANAGING_REQUESTS
@@ -520,6 +529,54 @@ async def handle_cancel_request(
     return ConversationHandler.END
 
 
+async def handle_cancel_request_as_creator(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    # split("_")[2] because of "cancel_matched_123"
+    request_id = int(query.data.split("_")[2])
+    creator_id = update.effective_user.id
+
+    request_details = get_request_details(request_id=request_id)
+    partner_id = cancel_request_by_creator(
+        request_id=request_id, creator_user_id=creator_id
+    )
+
+    if partner_id and request_details:
+        logger.info(
+            f"SUCCESS: Creator {creator_id} cancelled matched request {request_id}."
+        )
+        await query.edit_message_text(text="✅ Вы успешно отменили встречу.")
+
+        try:
+            shop_name = escape_markdown(request_details["shop_name"])
+            meet_time_moscow = request_details["meet_time"].astimezone(MOSCOW_TIMEZONE)
+            date_str = meet_time_moscow.strftime("%d.%m.%Y")
+            time_str = meet_time_moscow.strftime("%H:%M")
+
+            partner_message = (
+                f"К сожалению, создатель заявки отменил вашу встречу в «*{shop_name}*» "
+                f"({date_str} в {time_str}). 😔"
+            )
+            await context.bot.send_message(
+                chat_id=partner_id, text=partner_message, parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to send cancellation notification to partner {partner_id}: {e}"
+            )
+    else:
+        logger.warning(
+            f"FAILURE: Creator {creator_id} failed to cancel matched request {request_id}."
+        )
+        await query.edit_message_text(text="❌ Не удалось отменить встречу.")
+
+    await show_main_menu_keyboard(update, context, text="Главное меню:")
+    return ConversationHandler.END
+
+
 async def handle_unmatch_request(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -533,20 +590,30 @@ async def handle_unmatch_request(
         f"User {partner_id} is attempting to unmatch from request {request_id}."
     )
 
+    request_details = get_request_details(request_id=request_id)
+
     creator_id = unmatch_request(request_id=request_id, partner_user_id=partner_id)
 
-    if creator_id:
+    if creator_id and request_details:
         logger.info(f"SUCCESS: User {partner_id} unmatched from request {request_id}.")
         await query.edit_message_text(
             text="✅ Отменил участие в кофе-мите! Заявка снова стала доступна для других.\n\n Может, создашь новую для встречи в другое время?)"
         )
 
         try:
+            shop_name = escape_markdown(request_details["shop_name"])
+            meet_time_moscow = request_details["meet_time"].astimezone(MOSCOW_TIMEZONE)
+            date_str = meet_time_moscow.strftime("%d.%m.%Y")
+            time_str = meet_time_moscow.strftime("%H:%M")
+
             creator_message = (
-                "Плохие новости: твой партнер по кофе отменил встречу. 😔\n\n"
-                "Но не переживай, твоя заявка снова активна и видна другим пользователям!"
+                f"К сожалению, ваш партнер по кофе отменил встречу в «*{shop_name}*» "
+                f"({date_str} в {time_str}). 😔\n\n"
+                "Но не переживайте, ваша заявка снова активна и видна другим пользователям!"
             )
-            await context.bot.send_message(chat_id=creator_id, text=creator_message)
+            await context.bot.send_message(
+                chat_id=creator_id, text=creator_message, parse_mode="Markdown"
+            )
         except Exception as e:
             logger.error(
                 f"Failed to send unmatch notification to creator {creator_id}: {e}"
@@ -597,7 +664,8 @@ async def notify_users_about_pairing(
     partner_mention = f"@{partner_username}" if partner_username else partner_first_name
 
     shop_name = details["shop_name"]
-    meet_time_str = details["meet_time"].strftime("%H:%M")
+    meet_time_moscow = details["meet_time"].astimezone(MOSCOW_TIMEZONE)
+    meet_time_str = meet_time_moscow.strftime("%H:%M")
 
     message_to_creator = (
         f"Ура, на твою заявку откликнулись! 🎉\n\n"
@@ -643,7 +711,8 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
         )
 
         shop_name = meeting["shop_name"]
-        meet_time_str = meeting["meet_time"].strftime("%H:%M")
+        meet_time_moscow = meeting["meet_time"].astimezone(MOSCOW_TIMEZONE)
+        meet_time_str = meet_time_moscow.strftime("%H:%M")
         request_id = meeting["request_id"]
 
         reminder_text = f"""Хей! Просто дружеское напоминание 🔔
@@ -687,9 +756,9 @@ async def expire_requests(context: ContextTypes.DEFAULT_TYPE):
         creator_id = request["creator_user_id"]
         request_id = request["request_id"]
 
-        request_details = get_request_details(request_id=request_id)
-        shop_name = request_details["shop_name"]
-        meet_time_str = request_details["meet_time"].strftime("%H:%M")
+        shop_name = request["shop_name"]
+        meet_time_moscow = request["meet_time"].astimezone(MOSCOW_TIMEZONE)
+        meet_time_str = meet_time_moscow.strftime("%H:%M")
 
         failure_message = f"""Эх, в этот раз не сложилось: кофе-мит в {shop_name} в {meet_time_str} был отменён. \n\n   
         Похоже, сегодня вселенная кофе была чем-то занята, и на твою заявку никто не откликнулся. 😥\n\nНо это не повод грустить! Попробуй создать новую заявку на другое время или в другом месте. Следующий мэтч может быть всего в паре кликов от тебя! ✨"""
@@ -749,6 +818,10 @@ def main():
             MANAGING_REQUESTS: [
                 CallbackQueryHandler(handle_cancel_request, pattern="^cancel_"),
                 CallbackQueryHandler(handle_unmatch_request, pattern="^unmatch_"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
+                CallbackQueryHandler(
+                    handle_cancel_request_as_creator, pattern="^cancel_matched_"
+                ),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],

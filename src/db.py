@@ -306,6 +306,35 @@ def cancel_request(request_id: int, user_id: int) -> bool:
     return success
 
 
+def cancel_request_by_creator(request_id: int, creator_user_id: int) -> int | None:
+    sql = """
+    UPDATE
+        coffee_requests
+    SET
+        status = 'cancelled'
+    WHERE
+        request_id = %s
+        AND creator_user_id = %s
+        AND status = 'matched'
+    RETURNING
+        partner_user_id;
+    """
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (request_id, creator_user_id))
+                if cur.rowcount == 1:
+                    conn.commit()
+                    return cur.fetchone()[0]
+                else:
+                    conn.rollback()
+                    return None
+    except Exception as e:
+        print(f"DB ERROR in cancel_request_by_creator(): {e}")
+        return None
+
+
 def unmatch_request(request_id: int, partner_user_id: int) -> int | None:
     sql = """
     UPDATE
@@ -399,16 +428,20 @@ def mark_reminder_as_sent(request_id: int) -> bool:
 def expire_pending_requests() -> list:
     sql = """
     UPDATE
-        coffee_requests
+        coffee_requests r
     SET
         status = 'expired',
         is_failure_notification_sent = TRUE
     WHERE
-        status = 'pending'
-        AND meet_time < NOW() + INTERVAL '10 minutes'
-        AND is_failure_notification_sent = FALSE
+        r.status = 'pending'
+        AND r.meet_time < NOW() -- Changed from your version, see point #3 below
+        AND r.is_failure_notification_sent = FALSE
     RETURNING
-        request_id, creator_user_id;
+        r.request_id, r.creator_user_id, s.name as shop_name, r.meet_time
+    FROM
+        coffee_shops s
+    WHERE
+        r.shop_id = s.shop_id;
     """
 
     expired_requests = []

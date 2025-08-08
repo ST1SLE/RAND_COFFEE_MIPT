@@ -119,7 +119,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     welcome_text = (
         "Привет! 👋 Я бот для случайных кофе-митов.\n\n"
-        "❗️ Скорее жми «*Найти компанию* ☕️» ❗️"
+        "Скорее жми «☕️ Найти компанию»"
     )
     await show_main_menu_keyboard(update, context, text=welcome_text)
 

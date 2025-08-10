@@ -432,16 +432,15 @@ def expire_pending_requests() -> list:
     SET
         status = 'expired',
         is_failure_notification_sent = TRUE
-    WHERE
-        r.status = 'pending'
-        AND r.meet_time < NOW() -- Changed from your version, see point #3 below
-        AND r.is_failure_notification_sent = FALSE
-    RETURNING
-        r.request_id, r.creator_user_id, s.name as shop_name, r.meet_time
     FROM
         coffee_shops s
     WHERE
-        r.shop_id = s.shop_id;
+        r.shop_id = s.shop_id
+        AND r.status = 'pending'
+        AND r.meet_time < NOW()
+        AND r.is_failure_notification_sent = FALSE
+    RETURNING
+        r.request_id, r.creator_user_id, s.name as shop_name, r.meet_time;
     """
 
     expired_requests = []

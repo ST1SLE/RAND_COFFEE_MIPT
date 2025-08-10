@@ -1,6 +1,5 @@
 import os
 import logging
-import subprocess
 import re
 from datetime import datetime, time, timezone, timedelta
 from telegram import (
@@ -147,6 +146,9 @@ async def post_init(app):
         ]
     )
 
+    app.job_queue.run_repeating(send_reminders, interval=60, first=10)
+    app.job_queue.run_repeating(expire_requests, interval=60, first=15)
+
 
 async def find_company_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     keyboard = [
@@ -161,6 +163,7 @@ async def find_company_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "✍️ Создать свою заявку", callback_data="create_new_request"
             )
         ],
+        [InlineKeyboardButton("⬅️ Назад в главное меню", callback_data="main_menu")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -189,6 +192,8 @@ async def create_request_step1_shop(
         return ConversationHandler.END
 
     buttons = [(f"📍 {name}", f"shop_{shop_id}") for shop_id, name in shops]
+    buttons.append(("⬅️ Назад в главное меню", "main_menu"))
+
     reply_markup = build_inline_keyboard(buttons_data=buttons)
 
     await query.edit_message_text(
@@ -208,12 +213,17 @@ async def create_request_step2_date(
     chosen_shop_id = int(query.data.split("_")[1])
     context.user_data["chosen_shop_id"] = chosen_shop_id
 
+    back_button_keyboard = build_inline_keyboard(
+        [("⬅️ Назад в главное меню", "main_menu")]
+    )
+
     logger.info(
         f"User {update.effective_user.id} chose coffee shop with ID: {chosen_shop_id}"
     )
 
     await query.edit_message_text(
-        text="Принято! ✅\n\nТеперь давай определимся с датой. Напиши в формате *ДД.ММ*, в какой день тебе удобно встретиться (например, *25.12*)."
+        text="Принято! ✅\n\nТеперь давай определимся с датой. Напиши в формате *ДД.ММ*, в какой день тебе удобно встретиться (например, *25.12*).",
+        reply_markup=back_button_keyboard,
     )
     return CHOOSING_DATE
 
@@ -253,10 +263,15 @@ async def create_request_step3_time(
     context.user_data["chosen_date"] = proposed_date
     proposed_date_str = proposed_date.strftime("%d.%m.%Y")
 
+    back_button_keyboard = build_inline_keyboard(
+        [("⬅️ Назад в главное меню", "main_menu")]
+    )
+
     logger.info(f"User {update.effective_user.id} chose date {proposed_date_str}.")
 
     await update.message.reply_text(
-        "Отлично! ✅\n\n Теперь давай определимся со временем. Напиши, во сколько тебе удобно встретиться (например, *14:30*)."
+        "Отлично! ✅\n\n Теперь давай определимся со временем. Напиши, во сколько тебе удобно встретиться (например, *14:30*).",
+        reply_markup=back_button_keyboard,
     )
     return CHOOSING_TIME
 
@@ -798,25 +813,30 @@ def main():
                 CallbackQueryHandler(
                     view_available_requests, pattern="^view_available_requests$"
                 ),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             CHOOSING_SHOP: [
-                CallbackQueryHandler(create_request_step2_date, pattern="^shop_")
+                CallbackQueryHandler(create_request_step2_date, pattern="^shop_"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             CHOOSING_DATE: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, create_request_step3_time
-                )
+                ),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             CHOOSING_TIME: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, create_request_step4_validate
-                )
+                ),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             CHOOSING_REQUEST: [
-                CallbackQueryHandler(handle_accept_request, pattern="^accept_")
+                CallbackQueryHandler(handle_accept_request, pattern="^accept_"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             MANAGING_REQUESTS: [
-                CallbackQueryHandler(handle_cancel_request, pattern="^cancel_"),
+                CallbackQueryHandler(handle_cancel_request, pattern="^cancel_[0-9]+$"),
                 CallbackQueryHandler(handle_unmatch_request, pattern="^unmatch_"),
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
                 CallbackQueryHandler(
@@ -834,9 +854,6 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
 
     app.add_handler(MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command))
-
-    app.job_queue.run_repeating(send_reminders, interval=60, first=10)
-    app.job_queue.run_repeating(expire_requests, interval=60, first=15)
 
     logger.info(
         "Starting the bot. Reference to bot: https://t.me/random_coffee_mipt_bot"

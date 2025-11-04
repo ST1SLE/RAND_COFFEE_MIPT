@@ -241,17 +241,19 @@ async def create_request_step3_time(
         )
         return CHOOSING_DATE
 
-    try:
+     try:
+        now_moscow = datetime.now(MOSCOW_TIMEZONE)
         day, month = map(int, user_date_str.split("."))
-        proposed_date = datetime(datetime.now().year, month, day)
+        
+        proposed_date_naive = datetime(now_moscow.year, month, day)
 
-        if proposed_date.date() < datetime.now().date():
+        if proposed_date_naive.date() < now_moscow.date():
             await update.message.reply_text(
                 "Эта дата уже в прошлом 🤓! Пожалуйста, выбери сегодня или дату из будущего."
             )
             return CHOOSING_DATE
 
-        if (proposed_date.date() - datetime.now().date()).days > 14:
+        if (proposed_date_naive.date() - now_moscow.date()).days > 14:
             await update.message.reply_text(
                 "Давай не будем планировать так далеко 🤓! Выбери дату в пределах следующих 14 дней."
             )
@@ -262,8 +264,8 @@ async def create_request_step3_time(
         )
         return CHOOSING_DATE
 
-    context.user_data["chosen_date"] = proposed_date
-    proposed_date_str = proposed_date.strftime("%d.%m.%Y")
+    context.user_data["chosen_date"] = proposed_date_naive
+    proposed_date_str = proposed_date_naive.strftime("%d.%m.%Y")
 
     back_button_keyboard = build_inline_keyboard(
         [("⬅️ Назад в главное меню", "main_menu")]
@@ -332,6 +334,12 @@ async def create_request_step4_validate(
         meet_time = naive_meet_time.replace(tzinfo=MOSCOW_TIMEZONE)
     except ValueError:
         await update.message.reply_text("Произошла ошибка. Попробуй ещё раз.")
+        return CHOOSING_TIME
+
+    if meet_time < datetime.now(MOSCOW_TIMEZONE):
+        await update.message.reply_text(
+            "Это время уже прошло! 😅 Пожалуйста, выбери время в будущем."
+        )
         return CHOOSING_TIME
 
     shop_id = context.user_data["chosen_shop_id"]

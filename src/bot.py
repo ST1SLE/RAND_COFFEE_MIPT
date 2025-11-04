@@ -873,14 +873,28 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+find_handler = MessageHandler(filters.Regex("^☕️ Найти компанию$"), find_company_start)
+my_requests_handler = MessageHandler(
+    filters.Regex("^📂 Мои заявки$"), my_requests_start
+)
+help_handler = MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command)
+
+
 def main():
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
+    find_handler = MessageHandler(
+        filters.Regex("^☕️ Найти компанию$"), find_company_start
+    )
+    my_requests_handler = MessageHandler(
+        filters.Regex("^📂 Мои заявки$"), my_requests_start
+    )
+
     conv_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex("^☕️ Найти компанию$"), find_company_start),
+            find_handler,
             CommandHandler("find", find_company_start),
-            MessageHandler(filters.Regex("^📂 Мои заявки$"), my_requests_start),
+            my_requests_handler,
             CommandHandler("my_coffee_requests", my_requests_start),
         ],
         states={
@@ -922,16 +936,18 @@ def main():
                 ),
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[
+            find_handler,
+            my_requests_handler,
+            CommandHandler("cancel", cancel),
+        ],
+        allow_reentry=True,
         per_message=False,
     )
 
     app.add_handler(conv_handler)
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CallbackQueryHandler(handle_feedback, pattern="^feedback_"))
-
     app.add_handler(MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command))
 
     logger.info(

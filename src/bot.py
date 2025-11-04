@@ -235,9 +235,9 @@ async def create_request_step3_time(
 ) -> int:
     user_date_str = update.message.text
 
-    if not re.match(r"^(0[1-9]|[12]\d|3[01])\.(0[1-9]|1[0-2])$", user_date_str):
+    if not re.match(r"^(\d{1,2})\.(\d{1,2})$", user_date_str):
         await update.message.reply_text(
-            "Формат даты неверный 😥. Пожалуйста, введи дату как *ДД.ММ*, например: *01.09*"
+            "Формат даты неверный 😥. Пожалуйста, введи дату как *ДД.ММ*, например: *25.12* или *1.9*"
         )
         return CHOOSING_DATE
 
@@ -313,9 +313,19 @@ async def create_request_step4_validate(
     user = update.effective_user
     user_time_str = update.message.text
 
-    if not re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", user_time_str):
+    match = re.match(r"^(\d{1,2}):(\d{1,2})$", user_time_str)
+    if not match:
         await update.message.reply_text(
-            "Хм, что-то я не разобрал время. 🤔\n\n Попробуй, пожалуйста, в формате *ЧЧ:ММ*, например: *15:00* или *09:45*"
+            "Хм, что-то я не разобрал время. 🤔\n\n Попробуй, пожалуйста, в формате *ЧЧ:ММ*, например: *15:00* или *9:45*"
+        )
+        return CHOOSING_TIME
+
+    hour_str, minute_str = match.groups()
+    hour, minute = int(hour_str), int(minute_str)
+
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        await update.message.reply_text(
+            "Такого времени не бывает 🤔. Часы должны быть от 0 до 23, а минуты — от 0 до 59."
         )
         return CHOOSING_TIME
 

@@ -241,10 +241,10 @@ async def create_request_step3_time(
         )
         return CHOOSING_DATE
 
-     try:
+    try:
         now_moscow = datetime.now(MOSCOW_TIMEZONE)
         day, month = map(int, user_date_str.split("."))
-        
+
         proposed_date_naive = datetime(now_moscow.year, month, day)
 
         if proposed_date_naive.date() < now_moscow.date():

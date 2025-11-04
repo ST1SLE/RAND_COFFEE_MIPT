@@ -457,6 +457,37 @@ def expire_pending_requests() -> list:
     return expired_requests
 
 
+def get_meetings_for_feedback() -> list:
+    sql = """
+    SELECT
+        r.request_id, r.creator_user_id, r.partner_user_id, s.name as shop_name, r.meet_time
+    FROM coffee_requests r
+    JOIN coffee_shops s ON r.shop_id = s.shop_id
+    WHERE
+        r.status = 'matched'
+        AND r.is_feedback_requested = FALSE
+        AND r.meet_time < NOW() - INTERVAL '1 hour';
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(sql)
+                return cur.fetchall()
+    except Exception as e:
+        print(f"ERROR in get_meetings_for_feedback(): {e}")
+        return []
+
+
+def mark_feedback_as_requested(request_id: int):
+    sql = (
+        "UPDATE coffee_requests SET is_feedback_requested = TRUE WHERE request_id = %s;"
+    )
+
+
+def save_meeting_outcome(request_id: int, outcome: str):
+    sql = "UPDATE coffee_requests SET meeting_outcome = %s WHERE request_id = %s;"
+
+
 def main():
     pass
 

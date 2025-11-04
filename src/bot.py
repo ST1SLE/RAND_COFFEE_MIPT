@@ -149,6 +149,7 @@ async def post_init(app):
 
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
     app.job_queue.run_repeating(expire_requests, interval=60, first=15)
+    app.job_queue.run_repeating(request_feedback, interval=300, first=60)
 
 
 async def find_company_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -790,6 +791,82 @@ async def expire_requests(context: ContextTypes.DEFAULT_TYPE):
             )
 
 
+async def request_feedback(context: ContextTypes.DEFAULT_TYPE):
+    logger.info("JOB: checking for meetings to request feedback on...")
+    meetings_for_feedback = get_meetings_for_feedback()
+
+    for meeting in meetings_for_feedback:
+        request_id = meeting["request_id"]
+        creator_id = meeting["creator_user_id"]
+        partner_id = meeting["partner_user_id"]
+
+        feedback_text = (
+            f"Привет! Как прошел ваш кофе-мит в «{meeting['shop_name']}» "
+            f"в {meeting['meet_time'].astimezone(MOSCOW_TIMEZONE).strftime('%H:%M')}? "
+            "Это поможет нам улучшить бота. 🙏"
+        )
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "✅ Все отлично, встреча состоялась!",
+                    callback_data=f"feedback_attended_{request_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "👤 Партнер не пришел",
+                    callback_data=f"feedback_partner_no_show_{request_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "😔 Я не смог(ла) прийти",
+                    callback_data=f"feedback_creator_no_show_{request_id}",
+                )
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await context.bot.send_message(
+                chat_id=creator_id, text=feedback_text, reply_markup=reply_markup
+            )
+            await context.bot.send_message(
+                chat_id=partner_id, text=feedback_text, reply_markup=reply_markup
+            )
+            mark_feedback_as_requested(request_id)
+            logger.info(f"Successfully requested feedback for request_id: {request_id}")
+        except Exception as e:
+            logger.error(f"Failed to request feedback for request {request_id}: {e}")
+
+
+async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    parts = query.data.split("_")
+    outcome_str = parts[1]
+    request_id = int(parts[2])
+    user_id = update.effective_user.id
+
+    details = get_request_details(request_id)
+    is_creator = user_id == details.get("creator_user_id")
+
+    final_outcome = None
+    if outcome_str == "attended":
+        final_outcome = "attended"
+    elif outcome_str == "partner_no_show":
+        final_outcome = "partner_no_show" if is_creator else "creator_no_show"
+    elif outcome_str == "creator_no_show":
+        final_outcome = "creator_no_show" if is_creator else "partner_no_show"
+
+    if final_outcome:
+        save_meeting_outcome(request_id, final_outcome)
+        await query.edit_message_text(text="Спасибо за ваш отзыв! 🙌")
+    else:
+        await query.edit_message_text(text="Произошла ошибка. Спасибо за попытку!")
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     cancel_text = "Без проблем, всё отменил. Если надумаешь вернуться — ты знаешь, где меня искать! 👍"
     await show_main_menu_keyboard(update, context, text=cancel_text)
@@ -853,6 +930,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CallbackQueryHandler(handle_feedback, pattern="^feedback_"))
 
     app.add_handler(MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command))
 

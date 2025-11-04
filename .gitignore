@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .vscode/
 sensitive_data/
+data_analytics_plan.md

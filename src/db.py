@@ -83,6 +83,19 @@ def get_active_coffee_shops() -> list:
         return []
 
 
+def get_shop_details(shop_id: int) -> dict:
+    sql = "SELECT name, description FROM coffee_shops WHERE shop_id = %s;"
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(sql, (shop_id,))
+                result = cur.fetchone()
+                return result if result else {}
+    except Exception as e:
+        print(f"error in get_shop_details(): {e}")
+        return {}
+
+
 def get_shop_working_hours(shop_id: int) -> dict:
     sql = "SELECT working_hours FROM coffee_shops WHERE shop_id = %s;"
     try:

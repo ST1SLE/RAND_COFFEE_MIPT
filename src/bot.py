@@ -36,6 +36,9 @@ from db import (
     expire_pending_requests,
     unmatch_request,
     cancel_request_by_creator,
+    get_shop_details,
+    mark_feedback_as_requested,
+    get_meetings_for_feedback,
 )
 
 load_dotenv()
@@ -48,10 +51,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-CHOOSING_ACTION, CHOOSING_SHOP, CHOOSING_DATE, CHOOSING_TIME, CHOOSING_REQUEST = range(
-    5
-)
-MANAGING_REQUESTS = 6
+(
+    CHOOSING_ACTION,
+    CHOOSING_SHOP,
+    VIEWING_SHOP_DETAILS,
+    CHOOSING_DATE,
+    CHOOSING_TIME,
+    CHOOSING_REQUEST,
+) = range(6)
+MANAGING_REQUESTS = 7
 
 STATUS_CONFIG = {
     "pending": {
@@ -180,6 +188,41 @@ async def find_company_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return CHOOSING_ACTION
 
 
+async def show_shop_details(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    shop_id = int(query.data.split("_")[1])
+    shop_details = get_shop_details(shop_id=shop_id)
+
+    if not shop_details:
+        await query.edit_message_text(
+            "Ошибка: не удалось найти информацию о кофейне. Попробуйте снова."
+        )
+        return await create_request_step1_shop(update, context)
+
+    shop_name = shop_details["name"]
+    shop_desc = shop_details["description"]
+
+    text = f"📍 *{shop_name}*\n\n{shop_desc}\n\nВыбираем это место?"
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "✅ Да, выбрать это место", callback_data=f"confirm_shop_{shop_id}"
+            )
+        ],
+        [InlineKeyboardButton("⬅️ Назад к списку", callback_data="back_to_shop_list")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text=text, reply_markup=reply_markup, parse_mode="Markdown"
+    )
+
+    return VIEWING_SHOP_DETAILS
+
+
 async def create_request_step1_shop(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -211,8 +254,8 @@ async def create_request_step2_date(
     query = update.callback_query
     await query.answer()
 
-    # because it came in like shop_67
-    chosen_shop_id = int(query.data.split("_")[1])
+    # Parse shop_id from callback data like "confirm_shop_67"
+    chosen_shop_id = int(query.data.split("_")[2])
     context.user_data["chosen_shop_id"] = chosen_shop_id
 
     back_button_keyboard = build_inline_keyboard(
@@ -926,12 +969,21 @@ def main():
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             CHOOSING_SHOP: [
-                CallbackQueryHandler(create_request_step2_date, pattern="^shop_"),
+                CallbackQueryHandler(show_shop_details, pattern="^shop_"),
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             CHOOSING_DATE: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND, create_request_step3_time
+                ),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
+            ],
+            VIEWING_SHOP_DETAILS: [
+                CallbackQueryHandler(
+                    create_request_step2_date, pattern="^confirm_shop_"
+                ),
+                CallbackQueryHandler(
+                    create_request_step1_shop, pattern="^back_to_shop_list$"
                 ),
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],

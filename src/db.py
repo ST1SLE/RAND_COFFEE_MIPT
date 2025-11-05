@@ -240,7 +240,7 @@ def get_user_requests(user_id: int) -> list:
         AND (
             (r.status IN ('pending', 'matched') AND r.meet_time > NOW())
             OR
-            (r.status = 'cancelled' AND r.created_at > NOW() - INTERVAL '7 day')
+            (r.status = 'cancelled' AND r.created_at > NOW() - INTERVAL '2 days')
         )
     ORDER BY
         r.meet_time ASC;

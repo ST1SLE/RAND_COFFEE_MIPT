@@ -477,6 +477,7 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
     else:
         message_parts = ["*Твои кофе-миты ☕️:*\n"]
+        now_moscow = datetime.now(MOSCOW_TIMEZONE)
 
         for req in requests:
             status = req["status"]
@@ -484,6 +485,7 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 continue
 
             config = STATUS_CONFIG[status]
+            meet_time_moscow = req["meet_time"].astimezone(MOSCOW_TIMEZONE)
 
             partner_mention = ""
             if status == "matched":
@@ -497,7 +499,10 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 else:
                     partner_mention = "партнером"
 
-            meet_time_moscow = req["meet_time"].astimezone(MOSCOW_TIMEZONE)
+            icon = config["icon"]
+            if status == "matched" and meet_time_moscow < now_moscow:
+                icon = "✅"
+
             date_str = meet_time_moscow.strftime("%d.%m.%Y")
             time_str = meet_time_moscow.strftime("%H:%M")
 
@@ -506,27 +511,26 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 partner_mention=partner_mention,
             )
 
-            message_parts.append(
-                f"{config['icon']} *{date_str}* в *{time_str}*\n{details_str}"
-            )
+            message_parts.append(f"{icon} *{date_str}* в *{time_str}*\n{details_str}")
 
             button_to_add = None
-            if status == "pending" and user_id == req["creator_user_id"]:
-                button_to_add = InlineKeyboardButton(
-                    f"❌ Отменить заявку в «{req['shop_name']}»",
-                    callback_data=f"cancel_{req['request_id']}",
-                )
-            elif status == "matched":
-                if user_id == req["partner_user_id"]:
+            if meet_time_moscow > now_moscow:
+                if status == "pending" and user_id == req["creator_user_id"]:
                     button_to_add = InlineKeyboardButton(
-                        f"❌ Отказаться от встречи в «{req['shop_name']}»",
-                        callback_data=f"unmatch_{req['request_id']}",
+                        f"❌ Отменить заявку в «{req['shop_name']}»",
+                        callback_data=f"cancel_{req['request_id']}",
                     )
-                elif user_id == req["creator_user_id"]:
-                    button_to_add = InlineKeyboardButton(
-                        f"❌ Отменить встречу в «{req['shop_name']}»",
-                        callback_data=f"cancel_matched_{req['request_id']}",
-                    )
+                elif status == "matched":
+                    if user_id == req["partner_user_id"]:
+                        button_to_add = InlineKeyboardButton(
+                            f"❌ Отказаться от встречи в «{req['shop_name']}»",
+                            callback_data=f"unmatch_{req['request_id']}",
+                        )
+                    elif user_id == req["creator_user_id"]:
+                        button_to_add = InlineKeyboardButton(
+                            f"❌ Отменить встречу в «{req['shop_name']}»",
+                            callback_data=f"cancel_matched_{req['request_id']}",
+                        )
 
             if button_to_add:
                 keyboard_rows.append([button_to_add])

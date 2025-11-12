@@ -796,7 +796,7 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
 
         reminder_text = f"""Хей! Просто дружеское напоминание 🔔
 
-        В {meet_time_str} у тебя кофе-мит с {partner_mention} в {shop_name}!
+        В {meet_time_str} у тебя кофе-мит в {shop_name}!
 
         Время зарядиться кофе и общением! ☕️"""
 

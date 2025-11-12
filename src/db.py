@@ -1,7 +1,7 @@
 import os
 import psycopg2
 import psycopg2.extras
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from dotenv import load_dotenv
 import json
@@ -126,7 +126,8 @@ def create_coffee_request(creator_user_id: int, shop_id: int, meet_time: datetim
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (creator_user_id, shop_id, meet_time, datetime.now()))
+                now_utc = datetime.now(timezone.utc)
+                cur.execute(sql, (creator_user_id, shop_id, meet_time, now_utc))
                 conn.commit()
                 print(
                     f"SUCCESS in creating coffee request for user with id: {creator_user_id}"
@@ -381,27 +382,27 @@ def unmatch_request(request_id: int, partner_user_id: int) -> int | None:
 
 def get_meetings_for_reminder() -> list:
     sql = """
-    SELECT
-        r.request_id,
-        r.creator_user_id,
-        creator.username AS creator_username,
-        creator.first_name AS creator_first_name,
-        r.partner_user_id,
-        partner.username AS partner_username,
-        partner.first_name AS partner_first_name,
-        s.name AS shop_name, r.meet_time
-    FROM
-        coffee_requests AS r
-    JOIN
-        users AS creator ON r.creator_user_id = creator.user_id
-    JOIN
-        users AS partner ON r.partner_user_id = partner.user_id
-    JOIN
-        coffee_shops AS s ON r.shop_id = s.shop_id
-    WHERE
-        r.status = 'matched'
-        AND r.is_reminder_sent = FALSE
-        AND r.meet_time BETWEEN NOW() AND NOW() + INTERVAL '20 minutes';
+    UPDATE coffee_requests
+    SET is_reminder_sent = TRUE
+    WHERE request_id IN (
+        SELECT request_id
+        FROM coffee_requests
+        WHERE
+            status = 'matched'
+            AND is_reminder_sent = FALSE
+            AND meet_time BETWEEN NOW() AND NOW() + INTERVAL '20 minutes'
+        FOR UPDATE SKIP LOCKED
+    )
+    RETURNING
+        request_id,
+        creator_user_id,
+        (SELECT username FROM users WHERE user_id = creator_user_id) AS creator_username,
+        (SELECT first_name FROM users WHERE user_id = creator_user_id) AS creator_first_name,
+        partner_user_id,
+        (SELECT username FROM users WHERE user_id = partner_user_id) AS partner_username,
+        (SELECT first_name FROM users WHERE user_id = partner_user_id) AS partner_first_name,
+        (SELECT name FROM coffee_shops WHERE shop_id = coffee_requests.shop_id) AS shop_name,
+        meet_time;
     """
 
     meetings = []
@@ -410,6 +411,7 @@ def get_meetings_for_reminder() -> list:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
                 cur.execute(sql)
                 meetings = cur.fetchall()
+                conn.commit()
     except Exception as e:
         print(f"ERROR in get_meetings_for_reminder(): {e}")
 

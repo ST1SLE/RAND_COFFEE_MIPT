@@ -381,7 +381,6 @@ async def create_request_step4_validate(
         return ConversationHandler.END
 
     try:
-        hour, minute = map(int, user_time_str.split(":"))
         naive_meet_time = chosen_date.replace(
             hour=hour, minute=minute, second=0, microsecond=0
         )
@@ -748,7 +747,8 @@ async def notify_users_about_pairing(
 
     message_to_creator = (
         f"Ура, на твою заявку откликнулись! 🎉\n\n"
-        f"Твоя компания на кофе — {partner_mention}. Кофе-мит в {shop_name} в {meet_time_str}.\n\n"
+        f"Твоя компания на кофе — {partner_mention}. Можешь написать ему(ей) для уточнения деталей. "
+        f"Кофе-мит в {shop_name} в {meet_time_str}.\n\n"
         f"Думаю, это будет интересный перерыв! 😉"
     )
 
@@ -810,15 +810,6 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(chat_id=creator_id, text=message_to_creator)
             await context.bot.send_message(chat_id=partner_id, text=message_to_partner)
-
-            success = mark_reminder_as_sent(request_id)
-            if success:
-                logger.info(f"Successfully sent reminder for request_id: {request_id}")
-            else:
-                logger.warning(
-                    f"Sent reminders but FAILED to mark as sent for request_id: {request_id}"
-                )
-
         except Exception as e:
             logger.error(f"Failed to send reminder for request_id {request_id}: {e}")
 

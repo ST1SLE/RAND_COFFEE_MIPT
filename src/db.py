@@ -493,14 +493,35 @@ def get_meetings_for_feedback() -> list:
         return []
 
 
-def mark_feedback_as_requested(request_id: int):
+def mark_feedback_as_requested(request_id: int) -> bool:
     sql = (
         "UPDATE coffee_requests SET is_feedback_requested = TRUE WHERE request_id = %s;"
     )
+    success = False
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (request_id,))
+                if cur.rowcount == 1:
+                    conn.commit()
+                    success = True
+    except Exception as e:
+        print(f"ERROR in mark_feedback_as_requested(): {e}")
+    return success
 
 
-def save_meeting_outcome(request_id: int, outcome: str):
+def save_meeting_outcome(request_id: int, outcome: str) -> bool:
     sql = "UPDATE coffee_requests SET meeting_outcome = %s WHERE request_id = %s;"
+    success = False
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (outcome, request_id))
+                conn.commit()
+                success = True
+    except Exception as e:
+        print(f"ERROR in save_meeting_outcome(): {e}")
+    return success
 
 
 def main():

@@ -39,6 +39,7 @@ from db import (
     get_shop_details,
     mark_feedback_as_requested,
     get_meetings_for_feedback,
+    save_meeting_outcome,
 )
 
 load_dotenv()
@@ -157,7 +158,7 @@ async def post_init(app):
 
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
     app.job_queue.run_repeating(expire_requests, interval=60, first=15)
-    app.job_queue.run_repeating(request_feedback, interval=300, first=60)
+    app.job_queue.run_repeating(request_feedback, interval=1800, first=60)
 
 
 async def find_company_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -895,8 +896,15 @@ async def request_feedback(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=partner_id, text=feedback_text, reply_markup=reply_markup
             )
-            mark_feedback_as_requested(request_id)
-            logger.info(f"Successfully requested feedback for request_id: {request_id}")
+            success = mark_feedback_as_requested(request_id)
+            if success:
+                logger.info(
+                    f"Successfully requested and marked feedback for request_id: {request_id}"
+                )
+            else:
+                logger.warning(
+                    f"Sent feedback request but FAILED to mark as sent for request_id: {request_id}"
+                )
         except Exception as e:
             logger.error(f"Failed to request feedback for request {request_id}: {e}")
 
@@ -1018,6 +1026,7 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CallbackQueryHandler(handle_feedback, pattern="^feedback_"))
     app.add_handler(MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command))
 
     logger.info(

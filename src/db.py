@@ -264,7 +264,9 @@ def pair_user_for_request(request_id: int, partner_user_id: int) -> bool:
         partner_user_id = %s,
         status = 'matched'
     WHERE
-        request_id = %s AND status = 'pending';
+        request_id = %s 
+        AND status = 'pending' 
+        AND partner_user_id IS NULL; -- Добавлено ключевое условие!
     """
 
     try:
@@ -354,7 +356,7 @@ def unmatch_request(request_id: int, partner_user_id: int) -> int | None:
         coffee_requests
     SET
         status = 'pending',
-        partner_user_id = NULL
+        partner_user_id = NULL  -- Эта строка критически важна!
     WHERE
         request_id = %s
         AND partner_user_id = %s

@@ -487,7 +487,7 @@ def get_meetings_for_feedback() -> list:
     WHERE
         r.status = 'matched'
         AND r.is_feedback_requested = FALSE
-        AND r.meet_time < NOW() - INTERVAL '1 hour';
+        AND r.meet_time < (NOW() - INTERVAL '30 minutes');
     """
     try:
         with get_db_connection() as conn:

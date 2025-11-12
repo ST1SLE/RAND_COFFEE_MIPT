@@ -904,9 +904,18 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    parts = query.data.split("_")
-    outcome_str = parts[1]
-    request_id = int(parts[2])
+    try:
+        callback_prefix, request_id_str = query.data.rsplit("_", 1)
+        request_id = int(request_id_str)
+    except (ValueError, IndexError):
+        logger.error(f"Could not parse feedback callback_data: {query.data}")
+        await query.edit_message_text(
+            text="Произошла ошибка при обработке вашего ответа."
+        )
+        return
+
+    outcome_str = callback_prefix[len("feedback_") :]
+
     user_id = update.effective_user.id
 
     details = get_request_details(request_id)
@@ -924,6 +933,9 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_meeting_outcome(request_id, final_outcome)
         await query.edit_message_text(text="Спасибо за ваш отзыв! 🙌")
     else:
+        logger.warning(
+            f"Unknown feedback outcome_str: {outcome_str} from data: {query.data}"
+        )
         await query.edit_message_text(text="Произошла ошибка. Спасибо за попытку!")
 
 

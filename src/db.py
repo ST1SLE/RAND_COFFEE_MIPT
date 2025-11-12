@@ -237,14 +237,18 @@ def get_user_requests(user_id: int) -> list:
         users as partner ON r.partner_user_id = partner.user_id
     WHERE
         (r.creator_user_id = %s OR r.partner_user_id = %s)
-        AND (r.status IN ('pending', 'matched', 'cancelled'))
         AND (
+            -- 1. Показываем все будущие встречи (pending и matched)
             (r.status IN ('pending', 'matched') AND r.meet_time > NOW())
             OR
-            (r.status = 'cancelled' AND r.created_at > NOW() - INTERVAL '2 days')
+            -- 2. Показываем завершенные встречи (matched) за последние 2 дня
+            (r.status = 'matched' AND r.meet_time BETWEEN NOW() - INTERVAL '2 days' AND NOW())
+            OR
+            -- 3. Показываем отмененные встречи (cancelled) за последний час
+            (r.status = 'cancelled' AND r.created_at > NOW() - INTERVAL '1 hour')
         )
     ORDER BY
-        r.meet_time ASC;
+        r.meet_time DESC; -- Изменено на DESC для показа самых свежих встреч первыми
     """
 
     try:

@@ -21,7 +21,9 @@ CREATE TABLE users (
     first_name VARCHAR(255) NOT NULL,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    phystech_school VARCHAR(50),
+    year_as_student INTEGER
 );
 
 -- Таблица кофеен

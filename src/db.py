@@ -194,7 +194,9 @@ def get_user_details(user_id: int) -> dict:
     sql = """
     SELECT
         username,
-        first_name
+        first_name,
+        phystech_school,
+        year_as_student
     FROM
         users
     WHERE
@@ -210,10 +212,30 @@ def get_user_details(user_id: int) -> dict:
                     return {
                         "username": result[0],
                         "first_name": result[1],
+                        "phystech_school": result[2],
+                        "year_as_student": result[3],
                     }
     except Exception as e:
         print(f"ERROR in get_user_details(): {e}")
         return {}
+
+
+def update_user_profile(user_id: int, school: str, year: int | None):
+    sql = """
+    UPDATE users
+    SET
+        phystech_school = %s,
+        year_as_student = %s
+    WHERE
+        user_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (school, year, user_id))
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in update_user_profile(): {e}")
 
 
 def get_user_requests(user_id: int) -> list:

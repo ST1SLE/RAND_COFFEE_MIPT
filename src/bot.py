@@ -40,6 +40,7 @@ from db import (
     mark_feedback_as_requested,
     get_meetings_for_feedback,
     save_meeting_outcome,
+    update_user_profile,
 )
 
 load_dotenv()
@@ -59,8 +60,18 @@ logger = logging.getLogger(__name__)
     CHOOSING_DATE,
     CHOOSING_TIME,
     CHOOSING_REQUEST,
-) = range(6)
-MANAGING_REQUESTS = 7
+    MANAGING_REQUESTS,
+    REGISTER_SCHOOL,
+    REGISTER_YEAR,
+) = range(9)
+
+SCHOOLS_LIST = [
+    ["ФРКТ", "ВШПИ", "ЛФИ"],
+    ["ФАКТ", "ФЭФМ", "ФПМИ"],
+    ["ФБМФ", "КНТ", "ШИР"],
+    ["Никакая из них"],
+]
+YEARS_LIST = [["1", "2", "3", "4"], ["5", "6", "7", "8"], ["Вернуться назад"]]
 
 STATUS_CONFIG = {
     "pending": {
@@ -124,12 +135,81 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_or_update_user(
         user_id=user.id, first_name=user.first_name, username=user.username
     )
+    user_details = get_user_details(user.id)
+    if user_details and user_details.get("phystech_school"):
+        welcome_text = (
+            "Привет! 👋 Я бот для случайных кофе-митов.\n\n"
+            "Скорее жми «☕️ Найти компанию»"
+        )
+        await show_main_menu_keyboard(update, context, text=welcome_text)
+        return ConversationHandler.END
 
-    welcome_text = (
-        "Привет! 👋 Я бот для случайных кофе-митов.\n\n"
-        "Скорее жми «☕️ Найти компанию»"
+    await update.message.reply_text(
+        "Привет! 👋 Перед тем как начать, давай познакомимся.\n\n"
+        "Из какой ты Физтех-школы?",
+        reply_markup=ReplyKeyboardMarkup(
+            SCHOOLS_LIST, one_time_keyboard=True, resize_keyboard=True
+        ),
     )
-    await show_main_menu_keyboard(update, context, text=welcome_text)
+    return REGISTER_SCHOOL
+
+
+async def register_school(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    school = update.message.text
+
+    flat_schools = [item for sublist in SCHOOLS_LIST for item in sublist]
+    if school not in flat_schools:
+        await update.message.reply_text("Пожалуйста, выбери вариант, используя кнопки.")
+        return REGISTER_SCHOOL
+
+    context.user_data["reg_school"] = school
+
+    if school == "Никакая из них":
+        user_id = update.effective_user.id
+        update_user_profile(user_id, school="External", year=None)
+
+        await show_main_menu_keyboard(
+            update,
+            context,
+            text="Добро пожаловать!\nТеперь ты можешь искать компанию.",
+        )
+        return ConversationHandler.END
+
+    await update.message.reply_text(
+        f"Отлично, {school}! А на каком ты курсе?",
+        reply_markup=ReplyKeyboardMarkup(
+            YEARS_LIST, one_time_keyboard=True, resize_keyboard=True
+        ),
+    )
+    return REGISTER_YEAR
+
+
+async def register_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    year_str = update.message.text
+
+    if year_str == "Вернуться назад":
+        await update.message.reply_text(
+            "Хорошо, давай выберем школу заново.",
+            reply_markup=ReplyKeyboardMarkup(
+                SCHOOLS_LIST, one_time_keyboard=True, resize_keyboard=True
+            ),
+        )
+        return REGISTER_SCHOOL
+
+    if not year_str.isdigit() or not (1 <= int(year_str) <= 8):
+        await update.message.reply_text("Пожалуйста, выбери курс кнопкой (1-8).")
+        return REGISTER_YEAR
+
+    school = context.user_data.get("reg_school")
+    year = int(year_str)
+    user_id = update.effective_user.id
+
+    update_user_profile(user_id, school=school, year=year)
+
+    await show_main_menu_keyboard(
+        update, context, text="Профиль заполнен! 🎉\nТеперь ты готов к кофе-митам."
+    )
+    return ConversationHandler.END
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -966,6 +1046,21 @@ def main():
         filters.Regex("^📂 Мои заявки$"), my_requests_start
     )
 
+    registration_conv = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            REGISTER_SCHOOL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, register_school)
+            ],
+            REGISTER_YEAR: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, register_year)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", start)],
+        allow_reentry=True,
+    )
+    app.add_handler(registration_conv)
+
     conv_handler = ConversationHandler(
         entry_points=[
             find_handler,
@@ -1025,6 +1120,7 @@ def main():
             find_handler,
             my_requests_handler,
             CommandHandler("cancel", cancel),
+            CommandHandler("start", start),
         ],
         allow_reentry=True,
         per_message=False,

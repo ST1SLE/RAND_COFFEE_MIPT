@@ -480,7 +480,7 @@ def expire_pending_requests() -> list:
     WHERE
         r.shop_id = s.shop_id
         AND r.status = 'pending'
-        AND r.meet_time < NOW()
+        AND r.meet_time < (NOW() + INTERVAL '5 minutes')
         AND r.is_failure_notification_sent = FALSE
     RETURNING
         r.request_id, r.creator_user_id, s.name as shop_name, r.meet_time;

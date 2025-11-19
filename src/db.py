@@ -36,7 +36,6 @@ def add_or_update_user(user_id: int, username: str, first_name: str):
     ON CONFLICT (user_id) DO UPDATE SET
         username = EXCLUDED.username,
         first_name = EXCLUDED.first_name,
-        is_active = TRUE,
         last_seen = EXCLUDED.last_seen;
     """
 

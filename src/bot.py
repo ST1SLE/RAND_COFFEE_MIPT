@@ -569,15 +569,22 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
             partner_mention = ""
             if status == "matched":
-                is_creator = user_id == req["creator_user_id"]
-                username_to_mention = (
-                    req["partner_username"] if is_creator else req["creator_username"]
-                )
-                if username_to_mention:
-                    safe_username = escape_markdown(username_to_mention)
-                    partner_mention = f"@{safe_username}"
+                time_until_meet = meet_time_moscow - now_moscow
+
+                if time_until_meet > timedelta(minutes=20):
+                    partner_mention = "🕵️ *Секретный партнер*"
                 else:
-                    partner_mention = "партнером"
+                    is_creator = user_id == req["creator_user_id"]
+                    username_to_mention = (
+                        req["partner_username"]
+                        if is_creator
+                        else req["creator_username"]
+                    )
+                    if username_to_mention:
+                        safe_username = escape_markdown(username_to_mention)
+                        partner_mention = f"@{safe_username}"
+                    else:
+                        partner_mention = "партнером"
 
             icon = config["icon"]
             if status == "matched" and meet_time_moscow < now_moscow:
@@ -593,6 +600,7 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
             message_parts.append(f"{icon} *{date_str}* в *{time_str}*\n{details_str}")
 
+            # Логика кнопок (только для будущих встреч)
             button_to_add = None
             if meet_time_moscow > now_moscow:
                 if status == "pending" and user_id == req["creator_user_id"]:
@@ -800,58 +808,39 @@ async def notify_users_about_pairing(
 
     details = get_request_details(request_id=request_id)
     if not details:
-        logger.error(
-            f"ERROR while getting request details in notify_users_about_pairing(). request_id: {request_id}."
-        )
+        logger.error(f"ERROR details not found for {request_id}")
         return
 
     creator_id = details["creator_user_id"]
-    creator_details = get_user_details(creator_id)
-
     partner_id = details["partner_user_id"]
-    partner_details = get_user_details(partner_id)
-
-    if not creator_details or not partner_details:
-        logger.error(
-            f"ERROR while getting user details in notify_users_about_pairing(). creator_id: {creator_id}, partner_id: {partner_id}."
-        )
-        return
-
-    creator_username = creator_details["username"]
-    creator_first_name = creator_details["first_name"]
-    creator_mention = f"@{creator_username}" if creator_username else creator_first_name
-
-    partner_username = partner_details["username"]
-    partner_first_name = partner_details["first_name"]
-    partner_mention = f"@{partner_username}" if partner_username else partner_first_name
-
     shop_name = details["shop_name"]
+
     meet_time_moscow = details["meet_time"].astimezone(MOSCOW_TIMEZONE)
     meet_time_str = meet_time_moscow.strftime("%H:%M")
 
-    message_to_creator = (
-        f"Ура, на твою заявку откликнулись! 🎉\n\n"
-        f"Твоя компания на кофе — {partner_mention}. Можешь написать ему(ей) для уточнения деталей. "
-        f"Кофе-мит в {shop_name} в {meet_time_str}.\n\n"
-        f"Думаю, это будет интересный перерыв! 😉"
+    common_text = (
+        f"Кофе-мит в «{shop_name}» в {meet_time_str}.\n\n"
+        f"ℹ️ *Контакт собеседника будет скрыт до момента напоминания "
+        f"(за 20 минут до встречи).* \nЭто сделано для того, чтобы мы все были "
+        f"менее предвзяты и открыты новому! 🕵️‍♂️"
     )
 
-    message_to_partner = (
-        f"Есть мэтч! 🎉\n\n"
-        f"Отлично, ты присоединился к заявке. Кофе-мит с {creator_mention} состоится в {shop_name} в {meet_time_str}.\n\n"
-        f"Не опаздывай! Надеюсь, вы классно проведете время. ☕️"
-    )
+    message_to_creator = f"Ура, на твою заявку откликнулись! 🎉\n\n{common_text}"
+
+    message_to_partner = f"Есть мэтч! 🎉\n\nТы присоединился к заявке. {common_text}"
 
     try:
-        await context.bot.send_message(chat_id=creator_id, text=message_to_creator)
-        await context.bot.send_message(chat_id=partner_id, text=message_to_partner)
+        await context.bot.send_message(
+            chat_id=creator_id, text=message_to_creator, parse_mode="Markdown"
+        )
+        await context.bot.send_message(
+            chat_id=partner_id, text=message_to_partner, parse_mode="Markdown"
+        )
         logger.info(
             f"SUCCESS in sending notifications to {creator_id} and {partner_id}."
         )
     except Exception as e:
-        logger.error(
-            f"ERROR in sending notifications for request {request_id    }: {e}"
-        )
+        logger.error(f"ERROR in sending notifications for request {request_id}: {e}")
 
 
 async def send_reminders(context: ContextTypes.DEFAULT_TYPE):

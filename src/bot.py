@@ -957,20 +957,27 @@ async def request_feedback(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=creator_id, text=feedback_text, reply_markup=reply_markup
             )
+        except Exception as e:
+            logger.error(
+                f"Failed to send feedback req to creator {creator_id} (req {request_id}): {e}"
+            )
+
+        try:
             await context.bot.send_message(
                 chat_id=partner_id, text=feedback_text, reply_markup=reply_markup
             )
-            success = mark_feedback_as_requested(request_id)
-            if success:
-                logger.info(
-                    f"Successfully requested and marked feedback for request_id: {request_id}"
-                )
-            else:
-                logger.warning(
-                    f"Sent feedback request but FAILED to mark as sent for request_id: {request_id}"
-                )
         except Exception as e:
-            logger.error(f"Failed to request feedback for request {request_id}: {e}")
+            logger.error(
+                f"Failed to send feedback req to partner {partner_id} (req {request_id}): {e}"
+            )
+
+        success = mark_feedback_as_requested(request_id)
+        if success:
+            logger.info(f"Marked feedback as requested for request_id: {request_id}")
+        else:
+            logger.error(
+                f"CRITICAL: Failed to mark feedback in DB for request_id: {request_id}"
+            )
 
 
 async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):

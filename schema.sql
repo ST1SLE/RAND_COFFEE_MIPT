@@ -55,7 +55,8 @@ CREATE TABLE coffee_requests (
     is_failure_notification_sent BOOLEAN NOT NULL DEFAULT false,
     -- Колонки для сбора фидбека
     is_feedback_requested BOOLEAN NOT NULL DEFAULT false,
-    meeting_outcome meeting_outcome_enum
+    meeting_outcome meeting_outcome_enum,
+    is_icebreaker_sent BOOLEAN NOT NULL DEFAULT false
 );
 
 CREATE TABLE cancellation_logs (

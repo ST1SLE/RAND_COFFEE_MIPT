@@ -1,6 +1,7 @@
 import os
 import logging
 import re
+import random
 from datetime import datetime, time, timezone, timedelta
 from telegram import (
     Update,
@@ -19,6 +20,7 @@ from telegram.ext import (
     filters,
     CallbackQueryHandler,
 )
+from icebreakers import ICEBREAKER_QUESTIONS
 from dotenv import load_dotenv
 from db import (
     add_or_update_user,
@@ -41,6 +43,7 @@ from db import (
     get_meetings_for_feedback,
     save_meeting_outcome,
     update_user_profile,
+    get_meetings_for_icebreaker,
 )
 
 load_dotenv()
@@ -236,6 +239,7 @@ async def post_init(app):
         ]
     )
 
+    app.job_queue.run_repeating(send_icebreakers, interval=60, first=20)
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
     app.job_queue.run_repeating(expire_requests, interval=60, first=15)
     app.job_queue.run_repeating(request_feedback, interval=1800, first=60)
@@ -841,6 +845,38 @@ async def notify_users_about_pairing(
         )
     except Exception as e:
         logger.error(f"ERROR in sending notifications for request {request_id}: {e}")
+
+
+async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
+    logger.info("JOB: sending icebreakers...")
+    meetings = get_meetings_for_icebreaker()
+
+    if not meetings:
+        return
+
+    for meeting in meetings:
+        creator_id = meeting["creator_user_id"]
+        partner_id = meeting["partner_user_id"]
+        request_id = meeting["request_id"]
+
+        question = random.choice(ICEBREAKER_QUESTIONS)
+
+        text = (
+            f"💡 *Тема для разогрева*\n\n"
+            f"Встреча уже совсем скоро! Если не знаете, с чего начать разговор, попробуйте обсудить это:\n\n"
+            f"«_{question}_»"
+        )
+
+        try:
+            await context.bot.send_message(
+                chat_id=creator_id, text=text, parse_mode="Markdown"
+            )
+            await context.bot.send_message(
+                chat_id=partner_id, text=text, parse_mode="Markdown"
+            )
+            logger.info(f"Successfully sent icebreaker for request_id: {request_id}")
+        except Exception as e:
+            logger.error(f"Failed to send icebreaker for request_id {request_id}: {e}")
 
 
 async def send_reminders(context: ContextTypes.DEFAULT_TYPE):

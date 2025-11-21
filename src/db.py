@@ -425,6 +425,39 @@ def unmatch_request(request_id: int, partner_user_id: int) -> int | None:
         return None
 
 
+def get_meetings_for_icebreaker() -> list:
+    sql = """
+    UPDATE coffee_requests
+    SET is_icebreaker_sent = TRUE
+    WHERE request_id IN (
+        SELECT request_id
+        FROM coffee_requests
+        WHERE
+            status = 'matched'
+            AND is_icebreaker_sent = FALSE
+            AND meet_time BETWEEN NOW() AND NOW() + INTERVAL '7 minutes'
+        FOR UPDATE SKIP LOCKED
+    )
+    RETURNING
+        request_id,
+        creator_user_id,
+        partner_user_id,
+        (SELECT name FROM coffee_shops WHERE shop_id = coffee_requests.shop_id) AS shop_name;
+    """
+
+    meetings = []
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(sql)
+                meetings = cur.fetchall()
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in get_meetings_for_icebreaker(): {e}")
+
+    return meetings
+
+
 def get_meetings_for_reminder() -> list:
     sql = """
     UPDATE coffee_requests

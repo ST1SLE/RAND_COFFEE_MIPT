@@ -14,6 +14,13 @@ CREATE TYPE meeting_outcome_enum AS ENUM (
     'both_no_show'
 );
 
+CREATE TYPE cancellation_event_enum AS ENUM (
+    'partner_unmatch',       
+    'creator_cancel_matched',
+    'creator_cancel_pending',
+    'admin_ban_cancel' 
+);
+
 -- Таблица пользователей
 CREATE TABLE users (
     user_id BIGINT PRIMARY KEY,
@@ -51,7 +58,18 @@ CREATE TABLE coffee_requests (
     meeting_outcome meeting_outcome_enum
 );
 
+CREATE TABLE cancellation_logs (
+    log_id SERIAL PRIMARY KEY,
+    request_id INTEGER NOT NULL REFERENCES coffee_requests(request_id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    event_type cancellation_event_enum NOT NULL,
+    event_time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+
 -- Индексы для ускорения выборок
 CREATE INDEX ON coffee_requests (creator_user_id);
 CREATE INDEX ON coffee_requests (partner_user_id);
 CREATE INDEX ON coffee_requests (status, meet_time);
+CREATE INDEX ON cancellation_logs (request_id);
+CREATE INDEX ON cancellation_logs (user_id);

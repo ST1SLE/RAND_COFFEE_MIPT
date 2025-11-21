@@ -318,6 +318,15 @@ def pair_user_for_request(request_id: int, partner_user_id: int) -> bool:
     return success
 
 
+def log_cancellation_event(conn, request_id: int, user_id: int, event_type: str):
+    sql = """
+    INSERT INTO cancellation_logs (request_id, user_id, event_type, event_time)
+    VALUES (%s, %s, %s, NOW());
+    """
+    with conn.cursor() as cur:
+        cur.execute(sql, (request_id, user_id, event_type))
+
+
 def cancel_request(request_id: int, user_id: int) -> bool:
     success = False
     sql = """
@@ -336,6 +345,9 @@ def cancel_request(request_id: int, user_id: int) -> bool:
             with conn.cursor() as cur:
                 cur.execute(sql, (request_id, user_id))
                 if cur.rowcount == 1:
+                    log_cancellation_event(
+                        conn, request_id, user_id, "creator_cancel_pending"
+                    )
                     conn.commit()
                     success = True
                 else:
@@ -366,8 +378,12 @@ def cancel_request_by_creator(request_id: int, creator_user_id: int) -> int | No
             with conn.cursor() as cur:
                 cur.execute(sql, (request_id, creator_user_id))
                 if cur.rowcount == 1:
+                    partner_id = cur.fetchone()[0]
+                    log_cancellation_event(
+                        conn, request_id, creator_user_id, "creator_cancel_matched"
+                    )
                     conn.commit()
-                    return cur.fetchone()[0]
+                    return partner_id
                 else:
                     conn.rollback()
                     return None
@@ -395,8 +411,12 @@ def unmatch_request(request_id: int, partner_user_id: int) -> int | None:
             with conn.cursor() as cur:
                 cur.execute(sql, (request_id, partner_user_id))
                 if cur.rowcount == 1:
+                    creator_id = cur.fetchone()[0]
+                    log_cancellation_event(
+                        conn, request_id, partner_user_id, "partner_unmatch"
+                    )
                     conn.commit()
-                    return cur.fetchone()[0]
+                    return creator_id
                 else:
                     conn.rollback()
                     return None

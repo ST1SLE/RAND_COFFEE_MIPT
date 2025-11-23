@@ -46,6 +46,7 @@ from db import (
     update_user_profile,
     get_meetings_for_icebreaker,
     get_all_active_users,
+    save_feedback_text,
 )
 
 load_dotenv()
@@ -827,7 +828,6 @@ async def notify_users_about_pairing(
     common_text = (
         f"Кофе-мит в «{shop_name}» в {meet_time_str}.\n\n"
         f"ℹ️ *Контакт собеседника будет скрыт до момента напоминания "
-        f"(за 20 минут до встречи).* \nЭто сделано для того, чтобы мы все были "
         f"менее предвзяты и открыты новому! 🕵️‍♂️"
     )
 
@@ -1049,7 +1049,28 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if final_outcome:
         save_meeting_outcome(request_id, final_outcome)
-        await query.edit_message_text(text="Спасибо за ваш отзыв! 🙌")
+        if final_outcome == "attended":
+            context.user_data["awaiting_feedback_id"] = request_id
+
+            keyboard = [
+                [
+                    InlineKeyboardButton(
+                        "Пропустить этот шаг ⏩", callback_data="skip_feedback"
+                    )
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(
+                text="Супер! Рад, что встреча состоялась. 🎉\n\n"
+                "Напиши пару слов о том, как все прошло? Это поможет мне стать лучше, "
+                "а лучшие истории попадут в еженедельный дайджест (анонимно).",
+                reply_markup=reply_markup,
+            )
+        else:
+            await query.edit_message_text(
+                text="Спасибо за ответ! Надеюсь, в следующий раз повезет больше. 🙌"
+            )
     else:
         logger.warning(
             f"Unknown feedback outcome_str: {outcome_str} from data: {query.data}"
@@ -1110,6 +1131,33 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def skip_feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    context.user_data.pop("awaiting_feedback_id", None)
+
+    await query.edit_message_text(
+        text="Окей, без проблем! Спасибо, что пользуешься ботом. ☕️"
+    )
+
+
+async def process_feedback_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    request_id = context.user_data.get("awaiting_feedback_id")
+    if not request_id:
+        return
+
+    user_text = update.message.text
+    if user_text in ["☕️ Найти компанию", "📂 Мои заявки", "ℹ️ Гайд"]:
+        context.user_data.pop("awaiting_feedback_id", None)
+        return
+
+    save_feedback_text(request_id, user_text)
+    context.user_data.pop("awaiting_feedback_id", None)
+
+    await update.message.reply_text("Спасибо! Твой отзыв записан. ❤️")
+
+
 def main():
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
@@ -1133,7 +1181,6 @@ def main():
         fallbacks=[CommandHandler("cancel", start)],
         allow_reentry=True,
     )
-    app.add_handler(registration_conv)
 
     conv_handler = ConversationHandler(
         entry_points=[
@@ -1200,12 +1247,23 @@ def main():
         per_message=False,
     )
 
+    app.add_handler(registration_conv)
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("broadcast", broadcast_command))
-    app.add_handler(CallbackQueryHandler(handle_feedback, pattern="^feedback_"))
+    app.add_handler(
+        CallbackQueryHandler(skip_feedback_handler, pattern="^skip_feedback$")
+    )
     app.add_handler(MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command))
+
+    app.add_handler(CallbackQueryHandler(handle_feedback, pattern="^feedback_"))
+    feedback_filter = (
+        filters.TEXT
+        & ~filters.COMMAND
+        & ~filters.Regex("^(☕️ Найти компанию|📂 Мои заявки|ℹ️ Гайд)$")
+    )
+    app.add_handler(MessageHandler(feedback_filter, process_feedback_text))
 
     logger.info(
         "Starting the bot. Reference to bot: https://t.me/random_coffee_mipt_bot"

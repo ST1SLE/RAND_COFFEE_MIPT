@@ -602,6 +602,17 @@ def mark_feedback_as_requested(request_id: int) -> bool:
     return success
 
 
+def save_feedback_text(request_id: int, text: str):
+    sql = "UPDATE coffee_requests SET feedback_text = %s WHERE request_id = %s;"
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (text, request_id))
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in save_feedback_text(): {e}")
+
+
 def save_meeting_outcome(request_id: int, outcome: str) -> bool:
     sql = "UPDATE coffee_requests SET meeting_outcome = %s WHERE request_id = %s;"
     success = False

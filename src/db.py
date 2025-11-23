@@ -82,6 +82,18 @@ def get_active_coffee_shops() -> list:
         return []
 
 
+def get_all_active_users() -> list:
+    sql = "SELECT user_id FROM users WHERE is_active = TRUE;"
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+                return [row[0] for row in cur.fetchall()]
+    except Exception as e:
+        print(f"ERROR in get_all_active_users: {e}")
+        return []
+
+
 def get_shop_details(shop_id: int) -> dict:
     sql = "SELECT name, description FROM coffee_shops WHERE shop_id = %s;"
     try:

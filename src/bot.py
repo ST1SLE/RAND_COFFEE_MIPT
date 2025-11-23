@@ -1,6 +1,7 @@
 import os
 import logging
 import re
+import asyncio
 import random
 from datetime import datetime, time, timezone, timedelta
 from telegram import (
@@ -44,6 +45,7 @@ from db import (
     save_meeting_outcome,
     update_user_profile,
     get_meetings_for_icebreaker,
+    get_all_active_users,
 )
 
 load_dotenv()
@@ -1061,11 +1063,51 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
-find_handler = MessageHandler(filters.Regex("^☕️ Найти компанию$"), find_company_start)
-my_requests_handler = MessageHandler(
-    filters.Regex("^📂 Мои заявки$"), my_requests_start
-)
-help_handler = MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command)
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    admin_id = int(os.getenv("ADMIN_ID", "0"))
+    if update.effective_user.id != admin_id:
+        return
+
+    message_to_send = update.message.text.partition(" ")[2]
+
+    if not message_to_send:
+        await update.message.reply_text(
+            "⚠️ Ошибка: Пустое сообщение.\n"
+            "Использование: `/broadcast Текст вашей рассылки`",
+            parse_mode="Markdown",
+        )
+        return
+
+    users = get_all_active_users()
+    if not users:
+        await update.message.reply_text("Нет активных пользователей для рассылки.")
+        return
+
+    await update.message.reply_text(
+        f"📢 Начинаю рассылку на {len(users)} пользователей..."
+    )
+
+    success_count = 0
+    block_count = 0
+
+    for user_id in users:
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=message_to_send,
+                parse_mode="Markdown",
+            )
+            success_count += 1
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            logger.warning(f"Broadcast failed for {user_id}: {e}")
+            block_count += 1
+
+    await update.message.reply_text(
+        f"✅ Рассылка завершена!\n\n"
+        f"📨 Отправлено: {success_count}\n"
+        f"🚫 Не доставлено (бан): {block_count}"
+    )
 
 
 def main():
@@ -1161,6 +1203,7 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("broadcast", broadcast_command))
     app.add_handler(CallbackQueryHandler(handle_feedback, pattern="^feedback_"))
     app.add_handler(MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command))
 

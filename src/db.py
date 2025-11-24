@@ -179,13 +179,21 @@ def get_request_details(request_id: int) -> dict:
     sql = """
     SELECT
         r.creator_user_id,
+        c.username as creator_username,
+        c.first_name as creator_first_name,
         r.partner_user_id,
+        p.username as partner_username,
+        p.first_name as partner_first_name,
         s.name as shop_name,
         r.meet_time
     FROM
         coffee_requests as r
     JOIN
         coffee_shops as s ON r.shop_id = s.shop_id
+    JOIN
+        users as c ON r.creator_user_id = c.user_id
+    LEFT JOIN
+        users as p ON r.partner_user_id = p.user_id
     WHERE
         r.request_id = %s;
     """
@@ -530,6 +538,76 @@ def mark_reminder_as_sent(request_id: int) -> bool:
         print(f"ERROR in mark_reminder_as_sent(): {e}")
 
     return success
+
+
+def get_meetings_to_confirm() -> list:
+    sql = """
+    UPDATE coffee_requests
+    SET is_confirmation_sent = TRUE
+    WHERE request_id IN (
+        SELECT request_id
+        FROM coffee_requests
+        WHERE
+            status = 'matched'
+            AND is_confirmation_sent = FALSE
+            -- Интервал: от 1 часа 55 мин до 2 часов 05 мин до встречи
+            AND meet_time BETWEEN NOW() + INTERVAL '115 minutes' AND NOW() + INTERVAL '125 minutes'
+        FOR UPDATE SKIP LOCKED
+    )
+    RETURNING request_id, creator_user_id, partner_user_id, meet_time;
+    """
+    meetings = []
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(sql)
+                meetings = cur.fetchall()
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in get_meetings_to_confirm(): {e}")
+    return meetings
+
+
+def confirm_meeting_participation(request_id: int, user_id: int) -> bool:
+    sql = """
+    UPDATE coffee_requests
+    SET 
+        is_confirmed_by_creator = CASE WHEN creator_user_id = %s THEN TRUE ELSE is_confirmed_by_creator END,
+        is_confirmed_by_partner = CASE WHEN partner_user_id = %s THEN TRUE ELSE is_confirmed_by_partner END
+    WHERE request_id = %s
+    RETURNING is_confirmed_by_creator, is_confirmed_by_partner;
+    """
+
+    both_confirmed = False
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id, user_id, request_id))
+                result = cur.fetchone()
+                conn.commit()
+
+                if result:
+                    # result[0] - creator, result[1] - partner
+                    if result[0] and result[1]:
+                        both_confirmed = True
+    except Exception as e:
+        print(f"ERROR in confirm_meeting_participation: {e}")
+
+    return both_confirmed
+
+
+def increment_no_show_counter(user_id: int):
+    """
+    Увеличивает счетчик неявок пользователя на 1.
+    """
+    sql = "UPDATE users SET no_show_count = no_show_count + 1 WHERE user_id = %s;"
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id,))
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in increment_no_show_counter: {e}")
 
 
 def expire_pending_requests() -> list:

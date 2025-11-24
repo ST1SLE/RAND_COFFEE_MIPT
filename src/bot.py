@@ -47,6 +47,9 @@ from db import (
     get_meetings_for_icebreaker,
     get_all_active_users,
     save_feedback_text,
+    get_meetings_to_confirm,
+    confirm_meeting_participation,
+    increment_no_show_counter,
 )
 
 load_dotenv()
@@ -242,6 +245,7 @@ async def post_init(app):
         ]
     )
 
+    app.job_queue.run_repeating(send_confirmations_job, interval=300, first=30)
     app.job_queue.run_repeating(send_icebreakers, interval=60, first=20)
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
     app.job_queue.run_repeating(expire_requests, interval=60, first=15)
@@ -1049,6 +1053,18 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if final_outcome:
         save_meeting_outcome(request_id, final_outcome)
+
+        if final_outcome in ["partner_no_show", "creator_no_show"]:
+            guilty_id = None
+            if final_outcome == "partner_no_show":
+                guilty_id = details["partner_user_id"]
+            elif final_outcome == "creator_no_show":
+                guilty_id = details["creator_user_id"]
+
+            if guilty_id:
+                logger.info(f"Incrementing no_show count for user {guilty_id}")
+                increment_no_show_counter(guilty_id)
+
         if final_outcome == "attended":
             context.user_data["awaiting_feedback_id"] = request_id
 
@@ -1158,6 +1174,147 @@ async def process_feedback_text(update: Update, context: ContextTypes.DEFAULT_TY
     await update.message.reply_text("Спасибо! Твой отзыв записан. ❤️")
 
 
+async def send_confirmations_job(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Периодическая задача: рассылает кнопки подтверждения за 2 часа до встречи.
+    """
+    logger.info("JOB: sending confirmation requests...")
+    meetings = get_meetings_to_confirm()
+
+    if not meetings:
+        return
+
+    for meeting in meetings:
+        creator_id = meeting["creator_user_id"]
+        partner_id = meeting["partner_user_id"]
+        request_id = meeting["request_id"]
+
+        meet_time_moscow = meeting["meet_time"].astimezone(MOSCOW_TIMEZONE)
+        time_str = meet_time_moscow.strftime("%H:%M")
+
+        text = (
+            f"🔔 *Подтверждение встречи*\n\n"
+            f"Напоминаю, что сегодня в *{time_str}* у вас запланирован кофе-мит.\n\n"
+            f"Чтобы встреча состоялась и вы получили контакты партнера, пожалуйста, "
+            f"подтвердите, что вы точно придете."
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "✅ Я точно приду", callback_data=f"confirm_presence_{request_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "❌ Не смогу (отменить)",
+                    callback_data=f"cancel_matched_{request_id}",
+                )
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await context.bot.send_message(
+                chat_id=creator_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="Markdown",
+            )
+            await context.bot.send_message(
+                chat_id=partner_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode="Markdown",
+            )
+            logger.info(f"Sent confirmation request for request_id: {request_id}")
+        except Exception as e:
+            logger.error(
+                f"Failed to send confirmation for request_id {request_id}: {e}"
+            )
+
+
+async def send_final_contacts(context: ContextTypes.DEFAULT_TYPE, details: dict):
+    creator_id = details["creator_user_id"]
+    partner_id = details["partner_user_id"]
+    shop_name = details["shop_name"]
+    meet_time_moscow = details["meet_time"].astimezone(MOSCOW_TIMEZONE)
+    time_str = meet_time_moscow.strftime("%H:%M")
+
+    # Формируем упоминания
+    creator_mention = (
+        f"@{details['creator_username']}"
+        if details["creator_username"]
+        else details["creator_first_name"]
+    )
+    partner_mention = (
+        f"@{details['partner_username']}"
+        if details["partner_username"]
+        else details["partner_first_name"]
+    )
+
+    msg_to_creator = (
+        f"✅ *Встреча подтверждена!*\n\n"
+        f"Твой партнер: {partner_mention}\n"
+        f"Место: {shop_name}\n"
+        f"Время: {time_str}\n\n"
+        f"Хорошего кофе-мита! ☕️"
+    )
+
+    msg_to_partner = (
+        f"✅ *Встреча подтверждена!*\n\n"
+        f"Твой партнер: {creator_mention}\n"
+        f"Место: {shop_name}\n"
+        f"Время: {time_str}\n\n"
+        f"Хорошего кофе-мита! ☕️"
+    )
+
+    try:
+        await context.bot.send_message(
+            chat_id=creator_id, text=msg_to_creator, parse_mode="Markdown"
+        )
+        await context.bot.send_message(
+            chat_id=partner_id, text=msg_to_partner, parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(
+            f"Failed to send final contacts for request {details.get('creator_user_id')}: {e}"
+        )
+
+
+async def handle_confirmation_button(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    query = update.callback_query
+    await query.answer()
+
+    try:
+        # callback_data имеет вид "confirm_presence_123"
+        _, _, request_id_str = query.data.rsplit("_", 2)
+        request_id = int(request_id_str)
+    except (ValueError, IndexError):
+        await query.edit_message_text("Ошибка обработки кнопки.")
+        return
+
+    user_id = update.effective_user.id
+    both_confirmed = confirm_meeting_participation(request_id, user_id)
+
+    if both_confirmed:
+        details = get_request_details(request_id)
+        if details:
+            await query.edit_message_text(
+                "✅ Вы подтвердили участие! Оба участника готовы. Контакты отправлены отдельным сообщением."
+            )
+            await send_final_contacts(context, details)
+        else:
+            await query.edit_message_text("Ошибка: Встреча не найдена.")
+    else:
+        await query.edit_message_text(
+            "✅ Вы подтвердили участие!\n\n"
+            "Ждем подтверждения от партнера. Как только он ответит, я пришлю его контакт."
+        )
+
+
 def main():
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
@@ -1249,15 +1406,26 @@ def main():
 
     app.add_handler(registration_conv)
     app.add_handler(conv_handler)
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("broadcast", broadcast_command))
+    app.add_handler(MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command))
+
     app.add_handler(
         CallbackQueryHandler(skip_feedback_handler, pattern="^skip_feedback$")
     )
-    app.add_handler(MessageHandler(filters.Regex("^ℹ️ Гайд$"), help_command))
-
     app.add_handler(CallbackQueryHandler(handle_feedback, pattern="^feedback_"))
+
+    app.add_handler(
+        CallbackQueryHandler(handle_confirmation_button, pattern="^confirm_presence_")
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            handle_cancel_request_as_creator, pattern="^cancel_matched_"
+        )
+    )
+
     feedback_filter = (
         filters.TEXT
         & ~filters.COMMAND

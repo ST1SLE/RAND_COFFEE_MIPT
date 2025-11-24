@@ -30,7 +30,8 @@ CREATE TABLE users (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     phystech_school VARCHAR(50),
-    year_as_student INTEGER
+    year_as_student INTEGER,
+    no_show_count INTEGER DEFAULT 0
 );
 
 -- Таблица кофеен
@@ -57,7 +58,10 @@ CREATE TABLE coffee_requests (
     is_feedback_requested BOOLEAN NOT NULL DEFAULT false,
     meeting_outcome meeting_outcome_enum,
     is_icebreaker_sent BOOLEAN NOT NULL DEFAULT false,
-    feedback_text TEXT
+    feedback_text TEXT,
+    is_confirmed_by_creator BOOLEAN DEFAULT FALSE,
+    is_confirmed_by_partner BOOLEAN DEFAULT FALSE,
+    is_confirmation_sent BOOLEAN DEFAULT FALSE
 );
 
 CREATE TABLE cancellation_logs (

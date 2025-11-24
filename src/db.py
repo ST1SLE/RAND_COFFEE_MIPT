@@ -455,6 +455,8 @@ def get_meetings_for_icebreaker() -> list:
         WHERE
             status = 'matched'
             AND is_icebreaker_sent = FALSE
+            AND is_confirmed_by_creator = TRUE
+            AND is_confirmed_by_partner = TRUE
             AND meet_time BETWEEN NOW() AND NOW() + INTERVAL '7 minutes'
         FOR UPDATE SKIP LOCKED
     )
@@ -488,6 +490,8 @@ def get_meetings_for_reminder() -> list:
         WHERE
             status = 'matched'
             AND is_reminder_sent = FALSE
+            AND is_confirmed_by_creator = TRUE
+            AND is_confirmed_by_partner = TRUE
             AND meet_time BETWEEN NOW() AND NOW() + INTERVAL '20 minutes'
         FOR UPDATE SKIP LOCKED
     )
@@ -651,6 +655,8 @@ def get_meetings_for_feedback() -> list:
     WHERE
         r.status = 'matched'
         AND r.is_feedback_requested = FALSE
+        AND r.is_confirmed_by_creator = TRUE
+        AND r.is_confirmed_by_partner = TRUE
         AND r.meet_time < (NOW() - INTERVAL '30 minutes');
     """
     try:

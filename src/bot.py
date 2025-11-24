@@ -51,6 +51,8 @@ from db import (
     confirm_meeting_participation,
     increment_no_show_counter,
     cancel_unconfirmed_matches,
+    ban_user,
+    is_user_active,
 )
 
 load_dotenv()
@@ -141,6 +143,16 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+
+    if not is_user_active(user.id):
+        await update.message.reply_text(
+            "🚫 *Ваш аккаунт заблокирован.*\n\n"
+            "К сожалению, вы слишком часто пропускали встречи без предупреждения. "
+            "Доступ к боту ограничен.",
+            parse_mode="Markdown",
+        )
+        return ConversationHandler.END
+
     logger.info(f"User: {user.username} (ID: {user.id}) started bot.")
     add_or_update_user(
         user_id=user.id, first_name=user.first_name, username=user.username
@@ -255,6 +267,14 @@ async def post_init(app):
 
 
 async def find_company_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+
+    if not is_user_active(update.effective_user.id):
+        if update.callback_query:
+            await update.callback_query.answer("Вы заблокированы 🚫", show_alert=True)
+        else:
+            await update.message.reply_text("🚫 Вы заблокированы.")
+        return ConversationHandler.END
+
     keyboard = [
         [
             InlineKeyboardButton(
@@ -1084,8 +1104,36 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 guilty_id = details["creator_user_id"]
 
             if guilty_id:
-                logger.info(f"Incrementing no_show count for user {guilty_id}")
-                increment_no_show_counter(guilty_id)
+                new_count = increment_no_show_counter(guilty_id)
+                logger.info(f"User {guilty_id} no_show_count increased to {new_count}")
+
+                if new_count == 2:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=guilty_id,
+                            text="⚠️ *Предупреждение*\n\n"
+                            "Ваш партнер сообщил, что вы не пришли на встречу.\n"
+                            "Пожалуйста, уважайте время других студентов.\n\n"
+                            "❗️ **После 3-го пропуска ваш аккаунт будет заблокирован.** "
+                            "Сейчас у вас 2 пропуска.",
+                            parse_mode="Markdown",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not send warning to {guilty_id}: {e}")
+
+                elif new_count >= 3:
+                    ban_user(guilty_id)
+                    logger.warning(f"BANNED user {guilty_id} (no_shows: {new_count})")
+                    try:
+                        await context.bot.send_message(
+                            chat_id=guilty_id,
+                            text="🚫 *Ваш аккаунт заблокирован*\n\n"
+                            "Вы пропустили 3 встречи. В связи с систематическими нарушениями "
+                            "доступ к Coffee Meet MIPT для вас закрыт навсегда.",
+                            parse_mode="Markdown",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not send ban msg to {guilty_id}: {e}")
 
         if final_outcome == "attended":
             context.user_data["awaiting_feedback_id"] = request_id

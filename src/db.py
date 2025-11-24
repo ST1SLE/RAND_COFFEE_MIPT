@@ -612,18 +612,25 @@ def confirm_meeting_participation(request_id: int, user_id: int) -> bool:
     return both_confirmed
 
 
-def increment_no_show_counter(user_id: int):
+def increment_no_show_counter(user_id: int) -> int:
+    sql = """
+    UPDATE users 
+    SET no_show_count = no_show_count + 1 
+    WHERE user_id = %s
+    RETURNING no_show_count;
     """
-    Увеличивает счетчик неявок пользователя на 1.
-    """
-    sql = "UPDATE users SET no_show_count = no_show_count + 1 WHERE user_id = %s;"
+    new_count = 0
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, (user_id,))
+                result = cur.fetchone()
+                if result:
+                    new_count = result[0]
                 conn.commit()
     except Exception as e:
         print(f"ERROR in increment_no_show_counter: {e}")
+    return new_count
 
 
 def cancel_unconfirmed_matches() -> list:
@@ -752,6 +759,33 @@ def save_meeting_outcome(request_id: int, outcome: str) -> bool:
     except Exception as e:
         print(f"ERROR in save_meeting_outcome(): {e}")
     return success
+
+
+def ban_user(user_id: int):
+    sql = "UPDATE users SET is_active = FALSE WHERE user_id = %s;"
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id,))
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in ban_user: {e}")
+
+
+def is_user_active(user_id: int) -> bool:
+    sql = "SELECT is_active FROM users WHERE user_id = %s;"
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id,))
+                result = cur.fetchone()
+                if result:
+                    return result[0]
+                else:
+                    return True
+    except Exception as e:
+        print(f"ERROR in is_user_active: {e}")
+        return True
 
 
 def main():

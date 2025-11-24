@@ -824,21 +824,41 @@ async def notify_users_about_pairing(
         logger.error(f"ERROR details not found for {request_id}")
         return
 
+    meet_time_moscow = details["meet_time"].astimezone(MOSCOW_TIMEZONE)
+    now_moscow = datetime.now(MOSCOW_TIMEZONE)
+
+    is_spontaneous = (meet_time_moscow - now_moscow) < timedelta(minutes=45)
+
+    if is_spontaneous:
+        logger.info(
+            f"Spontaneous match for {request_id}. Sending contacts immediately."
+        )
+
+        msg_alert = "⚡️ *Спонтанная встреча!*\nТак как до встречи осталось мало времени, контакты открываются сразу."
+
+        await context.bot.send_message(
+            chat_id=details["creator_user_id"], text=msg_alert, parse_mode="Markdown"
+        )
+        await context.bot.send_message(
+            chat_id=details["partner_user_id"], text=msg_alert, parse_mode="Markdown"
+        )
+
+        await send_final_contacts(context, details)
+        return
+
     creator_id = details["creator_user_id"]
     partner_id = details["partner_user_id"]
     shop_name = details["shop_name"]
-
-    meet_time_moscow = details["meet_time"].astimezone(MOSCOW_TIMEZONE)
     meet_time_str = meet_time_moscow.strftime("%H:%M")
 
     common_text = (
         f"Кофе-мит в «{shop_name}» в {meet_time_str}.\n\n"
-        f"ℹ️ *Контакт собеседника будет скрыт до момента напоминания "
-        f"менее предвзяты и открыты новому! 🕵️‍♂️"
+        f"ℹ️ *Контакт собеседника скрыт.*\n"
+        f"За 2 часа до встречи я пришлю кнопку подтверждения. "
+        f"Как только вы оба нажмете «Я приду», контакты откроются."
     )
 
     message_to_creator = f"Ура, на твою заявку откликнулись! 🎉\n\n{common_text}"
-
     message_to_partner = f"Есть мэтч! 🎉\n\nТы присоединился к заявке. {common_text}"
 
     try:

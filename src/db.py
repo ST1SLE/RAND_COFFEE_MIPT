@@ -308,11 +308,23 @@ def pair_user_for_request(request_id: int, partner_user_id: int) -> bool:
     UPDATE coffee_requests
     SET 
         partner_user_id = %s,
-        status = 'matched'
+        status = 'matched',
+        is_confirmed_by_partner = CASE 
+            WHEN meet_time < (NOW() + INTERVAL '45 minutes') THEN TRUE 
+            ELSE FALSE 
+        END,
+        is_confirmed_by_creator = CASE 
+            WHEN meet_time < (NOW() + INTERVAL '45 minutes') THEN TRUE 
+            ELSE FALSE 
+        END,
+        is_confirmation_sent = CASE 
+            WHEN meet_time < (NOW() + INTERVAL '45 minutes') THEN TRUE 
+            ELSE FALSE 
+        END
     WHERE
         request_id = %s 
         AND status = 'pending' 
-        AND partner_user_id IS NULL; -- Добавлено ключевое условие!
+        AND partner_user_id IS NULL;
     """
 
     try:
@@ -621,7 +633,7 @@ def cancel_unconfirmed_matches() -> list:
     FROM coffee_shops s
     WHERE r.shop_id = s.shop_id
       AND r.status = 'matched'
-      AND r.meet_time < (NOW() + INTERVAL '10 minutes')
+      AND r.meet_time < (NOW() + INTERVAL '25 minutes')
       AND (r.is_confirmed_by_creator = FALSE OR r.is_confirmed_by_partner = FALSE)
     RETURNING
         r.request_id,

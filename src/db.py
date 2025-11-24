@@ -550,8 +550,8 @@ def get_meetings_to_confirm() -> list:
         WHERE
             status = 'matched'
             AND is_confirmation_sent = FALSE
-            -- Интервал: от 1 часа 55 мин до 2 часов 05 мин до встречи
-            AND meet_time BETWEEN NOW() + INTERVAL '115 minutes' AND NOW() + INTERVAL '125 minutes'
+            AND meet_time > NOW()
+            AND meet_time < (NOW() + INTERVAL '130 minutes')
         FOR UPDATE SKIP LOCKED
     )
     RETURNING request_id, creator_user_id, partner_user_id, meet_time;

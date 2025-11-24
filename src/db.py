@@ -634,6 +634,8 @@ def cancel_unconfirmed_matches() -> list:
     WHERE r.shop_id = s.shop_id
       AND r.status = 'matched'
       AND r.meet_time < (NOW() + INTERVAL '25 minutes')
+      AND r.meet_time > (NOW() - INTERVAL '1 hour') 
+
       AND (r.is_confirmed_by_creator = FALSE OR r.is_confirmed_by_partner = FALSE)
     RETURNING
         r.request_id,

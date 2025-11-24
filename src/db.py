@@ -614,6 +614,35 @@ def increment_no_show_counter(user_id: int):
         print(f"ERROR in increment_no_show_counter: {e}")
 
 
+def cancel_unconfirmed_matches() -> list:
+    sql = """
+    UPDATE coffee_requests r
+    SET status = 'cancelled'
+    FROM coffee_shops s
+    WHERE r.shop_id = s.shop_id
+      AND r.status = 'matched'
+      AND r.meet_time < (NOW() + INTERVAL '10 minutes')
+      AND (r.is_confirmed_by_creator = FALSE OR r.is_confirmed_by_partner = FALSE)
+    RETURNING
+        r.request_id,
+        r.creator_user_id,
+        r.partner_user_id,
+        s.name as shop_name,
+        r.is_confirmed_by_creator,
+        r.is_confirmed_by_partner;
+    """
+    cancelled_meetings = []
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(sql)
+                cancelled_meetings = cur.fetchall()
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in cancel_unconfirmed_matches(): {e}")
+    return cancelled_meetings
+
+
 def expire_pending_requests() -> list:
     sql = """
     UPDATE
@@ -626,7 +655,7 @@ def expire_pending_requests() -> list:
     WHERE
         r.shop_id = s.shop_id
         AND r.status = 'pending'
-        AND r.meet_time < (NOW() + INTERVAL '5 minutes')
+        AND r.meet_time < (NOW() + INTERVAL '10 minutes')
         AND r.is_failure_notification_sent = FALSE
     RETURNING
         r.request_id, r.creator_user_id, s.name as shop_name, r.meet_time;

@@ -50,6 +50,7 @@ from db import (
     get_meetings_to_confirm,
     confirm_meeting_participation,
     increment_no_show_counter,
+    cancel_unconfirmed_matches,
 )
 
 load_dotenv()
@@ -250,6 +251,7 @@ async def post_init(app):
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
     app.job_queue.run_repeating(expire_requests, interval=60, first=15)
     app.job_queue.run_repeating(request_feedback, interval=1800, first=60)
+    app.job_queue.run_repeating(auto_cancel_job, interval=300, first=40)
 
 
 async def find_company_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1313,6 +1315,73 @@ async def handle_confirmation_button(
             "✅ Вы подтвердили участие!\n\n"
             "Ждем подтверждения от партнера. Как только он ответит, я пришлю его контакт."
         )
+
+
+async def auto_cancel_job(context: ContextTypes.DEFAULT_TYPE):
+    logger.info("JOB: cleanup unconfirmed meetings...")
+    cancelled = cancel_unconfirmed_matches()
+
+    if not cancelled:
+        return
+
+    for meeting in cancelled:
+        creator_id = meeting["creator_user_id"]
+        partner_id = meeting["partner_user_id"]
+        shop_name = meeting["shop_name"]
+
+        conf_creator = meeting["is_confirmed_by_creator"]
+        conf_partner = meeting["is_confirmed_by_partner"]
+
+        msg_innocent = (
+            f"⚠️ *Встреча отменена*\n\n"
+            f"К сожалению, ваш партнер так и не подтвердил участие во встрече в «{shop_name}».\n"
+            f"Встреча автоматически отменена, чтобы вы не тратили время и не ехали зря. 😔"
+        )
+
+        msg_guilty = (
+            f"🚫 *Встреча отменена*\n\n"
+            f"Вы не подтвердили участие во встрече в «{shop_name}» вовремя.\n"
+            f"Встреча отменена."
+        )
+
+        msg_both_silent = (
+            f"🚫 *Встреча отменена*\n\n"
+            f"Никто из участников не подтвердил встречу в «{shop_name}»."
+        )
+
+        try:
+            if not conf_creator and not conf_partner:
+                await context.bot.send_message(
+                    chat_id=creator_id, text=msg_both_silent, parse_mode="Markdown"
+                )
+                await context.bot.send_message(
+                    chat_id=partner_id, text=msg_both_silent, parse_mode="Markdown"
+                )
+
+            elif conf_creator and not conf_partner:
+                await context.bot.send_message(
+                    chat_id=creator_id, text=msg_innocent, parse_mode="Markdown"
+                )
+                await context.bot.send_message(
+                    chat_id=partner_id, text=msg_guilty, parse_mode="Markdown"
+                )
+
+            elif not conf_creator and conf_partner:
+                await context.bot.send_message(
+                    chat_id=creator_id, text=msg_guilty, parse_mode="Markdown"
+                )
+                await context.bot.send_message(
+                    chat_id=partner_id, text=msg_innocent, parse_mode="Markdown"
+                )
+
+            logger.info(
+                f"Auto-cancelled request {meeting['request_id']} due to lack of confirmation"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to send cancel notification for req {meeting['request_id']}: {e}"
+            )
 
 
 def main():

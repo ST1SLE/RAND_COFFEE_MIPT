@@ -604,7 +604,15 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             if status == "matched":
                 time_until_meet = meet_time_moscow - now_moscow
 
-                if time_until_meet > timedelta(minutes=20):
+                is_confirmed_by_both = (
+                    req["is_confirmed_by_creator"] and req["is_confirmed_by_partner"]
+                )
+
+                should_show_contact = (
+                    time_until_meet <= timedelta(minutes=20)
+                ) or is_confirmed_by_both
+
+                if not should_show_contact:
                     partner_mention = "🕵️ *Секретный партнер*"
                 else:
                     is_creator = user_id == req["creator_user_id"]
@@ -633,7 +641,6 @@ async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
             message_parts.append(f"{icon} *{date_str}* в *{time_str}*\n{details_str}")
 
-            # Логика кнопок (только для будущих встреч)
             button_to_add = None
             if meet_time_moscow > now_moscow:
                 if status == "pending" and user_id == req["creator_user_id"]:

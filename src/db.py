@@ -267,7 +267,9 @@ def get_user_requests(user_id: int) -> list:
         r.creator_user_id,
         creator.username as creator_username,
         r.partner_user_id,
-        partner.username as partner_username
+        partner.username as partner_username,
+        r.is_confirmed_by_creator,
+        r.is_confirmed_by_partner
     FROM
         coffee_requests as r
     JOIN

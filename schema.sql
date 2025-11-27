@@ -31,7 +31,8 @@ CREATE TABLE users (
     last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     phystech_school VARCHAR(50),
     year_as_student INTEGER,
-    no_show_count INTEGER DEFAULT 0
+    no_show_count INTEGER DEFAULT 0,
+    coffee_streak INTEGER DEFAULT 0;
 );
 
 -- Таблица кофеен

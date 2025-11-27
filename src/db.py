@@ -152,11 +152,14 @@ def get_pending_requests(user_id: int) -> list:
     SELECT
         r.request_id,
         s.name,
-        r.meet_time
+        r.meet_time,
+        u.coffee_streak
     FROM
         coffee_requests AS r
     JOIN
         coffee_shops AS s ON r.shop_id = s.shop_id
+    JOIN
+        users AS u ON r.creator_user_id = u.user_id
     WHERE
         r.status = 'pending'
         AND r.creator_user_id != %s
@@ -164,7 +167,6 @@ def get_pending_requests(user_id: int) -> list:
     ORDER BY
         r.meet_time ASC;
     """
-
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -173,6 +175,36 @@ def get_pending_requests(user_id: int) -> list:
     except Exception as e:
         print(f"ERROR in get_pending_requests(): {e}")
         return []
+
+
+def increment_streaks(request_id: int):
+    sql = """
+    UPDATE users
+    SET coffee_streak = coffee_streak + 1
+    WHERE user_id IN (
+        SELECT creator_user_id FROM coffee_requests WHERE request_id = %s
+        UNION
+        SELECT partner_user_id FROM coffee_requests WHERE request_id = %s
+    );
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (request_id, request_id))
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in increment_streaks: {e}")
+
+
+def reset_user_streak(user_id: int):
+    sql = "UPDATE users SET coffee_streak = 0 WHERE user_id = %s;"
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id,))
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in reset_user_streak: {e}")
 
 
 def get_request_details(request_id: int) -> dict:
@@ -394,25 +426,33 @@ def cancel_request(request_id: int, user_id: int) -> bool:
 
 
 def cancel_request_by_creator(request_id: int, creator_user_id: int) -> int | None:
-    sql = """
-    UPDATE
-        coffee_requests
-    SET
-        status = 'cancelled'
-    WHERE
-        request_id = %s
-        AND creator_user_id = %s
-        AND status = 'matched'
-    RETURNING
-        partner_user_id;
+    check_sql = (
+        "SELECT is_confirmed_by_creator FROM coffee_requests WHERE request_id = %s"
+    )
+    update_sql = """
+    UPDATE coffee_requests
+    SET status = 'cancelled'
+    WHERE request_id = %s AND creator_user_id = %s AND status = 'matched'
+    RETURNING partner_user_id;
     """
 
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (request_id, creator_user_id))
+                cur.execute(check_sql, (request_id,))
+                res = cur.fetchone()
+                should_reset_streak = res[0] if res else False
+
+                cur.execute(update_sql, (request_id, creator_user_id))
                 if cur.rowcount == 1:
                     partner_id = cur.fetchone()[0]
+
+                    if should_reset_streak:
+                        cur.execute(
+                            "UPDATE users SET coffee_streak = 0 WHERE user_id = %s",
+                            (creator_user_id,),
+                        )
+
                     log_cancellation_event(
                         conn, request_id, creator_user_id, "creator_cancel_matched"
                     )
@@ -427,25 +467,32 @@ def cancel_request_by_creator(request_id: int, creator_user_id: int) -> int | No
 
 
 def unmatch_request(request_id: int, partner_user_id: int) -> int | None:
-    sql = """
-    UPDATE
-        coffee_requests
-    SET
-        status = 'pending',
-        partner_user_id = NULL  -- Эта строка критически важна!
-    WHERE
-        request_id = %s
-        AND partner_user_id = %s
-        AND status = 'matched'
-    RETURNING
-        creator_user_id;
+    check_sql = (
+        "SELECT is_confirmed_by_partner FROM coffee_requests WHERE request_id = %s"
+    )
+    update_sql = """
+    UPDATE coffee_requests
+    SET status = 'pending', partner_user_id = NULL
+    WHERE request_id = %s AND partner_user_id = %s AND status = 'matched'
+    RETURNING creator_user_id;
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (request_id, partner_user_id))
+                cur.execute(check_sql, (request_id,))
+                res = cur.fetchone()
+                should_reset_streak = res[0] if res else False
+
+                cur.execute(update_sql, (request_id, partner_user_id))
                 if cur.rowcount == 1:
                     creator_id = cur.fetchone()[0]
+
+                    if should_reset_streak:
+                        cur.execute(
+                            "UPDATE users SET coffee_streak = 0 WHERE user_id = %s",
+                            (partner_user_id,),
+                        )
+
                     log_cancellation_event(
                         conn, request_id, partner_user_id, "partner_unmatch"
                     )
@@ -750,14 +797,20 @@ def save_feedback_text(request_id: int, text: str):
 
 
 def save_meeting_outcome(request_id: int, outcome: str) -> bool:
-    sql = "UPDATE coffee_requests SET meeting_outcome = %s WHERE request_id = %s;"
+    sql = """
+    UPDATE coffee_requests 
+    SET meeting_outcome = %s 
+    WHERE request_id = %s AND meeting_outcome IS NULL
+    RETURNING request_id;
+    """
     success = False
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, (outcome, request_id))
-                conn.commit()
-                success = True
+                if cur.fetchone():
+                    conn.commit()
+                    success = True
     except Exception as e:
         print(f"ERROR in save_meeting_outcome(): {e}")
     return success

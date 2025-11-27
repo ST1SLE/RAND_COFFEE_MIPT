@@ -53,6 +53,8 @@ from db import (
     cancel_unconfirmed_matches,
     ban_user,
     is_user_active,
+    increment_streaks,
+    reset_user_streak,
 )
 
 load_dotenv()
@@ -551,13 +553,15 @@ async def view_available_requests(
         return CHOOSING_ACTION
 
     buttons = []
-    for request_id, shop_name, meet_time in requests:
+    for request_id, shop_name, meet_time, streak in requests:
         meet_time_moscow = meet_time.astimezone(MOSCOW_TIMEZONE)
 
-        date_str = meet_time_moscow.strftime("%d.%m")
-        time_str = meet_time_moscow.strftime("%H:%M")
+        date_time_str = meet_time_moscow.strftime("%d.%m %H:%M")
 
-        button_text = f"📍 {shop_name} - {date_str} @ {time_str}"
+        if streak >= 2:
+            button_text = f"🔥{streak} | 📍{shop_name} • {date_time_str}"
+        else:
+            button_text = f"📍{shop_name} • {date_time_str}"
         buttons.append((button_text, f"accept_{request_id}"))
 
     reply_markup = build_inline_keyboard(buttons_data=buttons)
@@ -1086,10 +1090,13 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     outcome_str = callback_prefix[len("feedback_") :]
-
     user_id = update.effective_user.id
 
     details = get_request_details(request_id)
+    if not details:
+        await query.edit_message_text("Встреча не найдена или истекла.")
+        return
+
     is_creator = user_id == details.get("creator_user_id")
 
     final_outcome = None
@@ -1101,7 +1108,7 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         final_outcome = "creator_no_show" if is_creator else "partner_no_show"
 
     if final_outcome:
-        save_meeting_outcome(request_id, final_outcome)
+        is_first_update = save_meeting_outcome(request_id, final_outcome)
 
         if final_outcome in ["partner_no_show", "creator_no_show"]:
             guilty_id = None
@@ -1110,7 +1117,9 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif final_outcome == "creator_no_show":
                 guilty_id = details["creator_user_id"]
 
-            if guilty_id:
+            if guilty_id and is_first_update:
+                reset_user_streak(guilty_id)
+
                 new_count = increment_no_show_counter(guilty_id)
                 logger.info(f"User {guilty_id} no_show_count increased to {new_count}")
 
@@ -1142,7 +1151,16 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except Exception as e:
                         logger.warning(f"Could not send ban msg to {guilty_id}: {e}")
 
-        if final_outcome == "attended":
+            await query.edit_message_text(
+                text="Спасибо за честность! Нам жаль, что встреча не состоялась. 😔\n"
+                "Мы приняли меры."
+            )
+
+        elif final_outcome == "attended":
+            if is_first_update:
+                increment_streaks(request_id)
+                logger.info(f"Streaks incremented for request {request_id}")
+
             context.user_data["awaiting_feedback_id"] = request_id
 
             keyboard = [
@@ -1160,10 +1178,7 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "а лучшие истории попадут в еженедельный дайджест (анонимно).",
                 reply_markup=reply_markup,
             )
-        else:
-            await query.edit_message_text(
-                text="Спасибо за ответ! Надеюсь, в следующий раз повезет больше. 🙌"
-            )
+
     else:
         logger.warning(
             f"Unknown feedback outcome_str: {outcome_str} from data: {query.data}"

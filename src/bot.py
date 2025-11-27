@@ -558,7 +558,7 @@ async def view_available_requests(
 
         date_time_str = meet_time_moscow.strftime("%d.%m %H:%M")
 
-        if streak >= 2:
+        if streak >= 1:
             button_text = f"🔥{streak} | 📍{shop_name} • {date_time_str}"
         else:
             button_text = f"📍{shop_name} • {date_time_str}"

@@ -3,6 +3,7 @@ import logging
 import re
 import asyncio
 import random
+import html
 from datetime import datetime, time, timezone, timedelta
 from telegram import (
     Update,
@@ -1267,9 +1268,6 @@ async def process_feedback_text(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def send_confirmations_job(context: ContextTypes.DEFAULT_TYPE):
-    """
-    Периодическая задача: рассылает кнопки подтверждения за 2 часа до встречи.
-    """
     logger.info("JOB: sending confirmation requests...")
     meetings = get_meetings_to_confirm()
 
@@ -1329,24 +1327,32 @@ async def send_confirmations_job(context: ContextTypes.DEFAULT_TYPE):
 async def send_final_contacts(context: ContextTypes.DEFAULT_TYPE, details: dict):
     creator_id = details["creator_user_id"]
     partner_id = details["partner_user_id"]
-    shop_name = details["shop_name"]
+    shop_name = html.escape(details["shop_name"])
+
     meet_time_moscow = details["meet_time"].astimezone(MOSCOW_TIMEZONE)
     time_str = meet_time_moscow.strftime("%H:%M")
 
-    # Формируем упоминания
-    creator_mention = (
-        f"@{details['creator_username']}"
-        if details["creator_username"]
-        else details["creator_first_name"]
+    def get_user_mention(user_id, username, first_name):
+        safe_name = html.escape(first_name)
+        if username:
+            return f"@{username}"
+        else:
+            return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+
+    creator_mention = get_user_mention(
+        creator_id,
+        details.get("creator_username"),
+        details.get("creator_first_name", "Студент"),
     )
-    partner_mention = (
-        f"@{details['partner_username']}"
-        if details["partner_username"]
-        else details["partner_first_name"]
+
+    partner_mention = get_user_mention(
+        partner_id,
+        details.get("partner_username"),
+        details.get("partner_first_name", "Студент"),
     )
 
     msg_to_creator = (
-        f"✅ *Встреча подтверждена!*\n\n"
+        f"✅ <b>Встреча подтверждена!</b>\n\n"
         f"Твой партнер: {partner_mention}\n"
         f"Место: {shop_name}\n"
         f"Время: {time_str}\n\n"
@@ -1354,7 +1360,7 @@ async def send_final_contacts(context: ContextTypes.DEFAULT_TYPE, details: dict)
     )
 
     msg_to_partner = (
-        f"✅ *Встреча подтверждена!*\n\n"
+        f"✅ <b>Встреча подтверждена!</b>\n\n"
         f"Твой партнер: {creator_mention}\n"
         f"Место: {shop_name}\n"
         f"Время: {time_str}\n\n"
@@ -1363,15 +1369,17 @@ async def send_final_contacts(context: ContextTypes.DEFAULT_TYPE, details: dict)
 
     try:
         await context.bot.send_message(
-            chat_id=creator_id, text=msg_to_creator, parse_mode="Markdown"
-        )
-        await context.bot.send_message(
-            chat_id=partner_id, text=msg_to_partner, parse_mode="Markdown"
+            chat_id=creator_id, text=msg_to_creator, parse_mode="HTML"
         )
     except Exception as e:
-        logger.error(
-            f"Failed to send final contacts for request {details.get('creator_user_id')}: {e}"
+        logger.error(f"Failed to send final contacts to CREATOR {creator_id}: {e}")
+
+    try:
+        await context.bot.send_message(
+            chat_id=partner_id, text=msg_to_partner, parse_mode="HTML"
         )
+    except Exception as e:
+        logger.error(f"Failed to send final contacts to PARTNER {partner_id}: {e}")
 
 
 async def handle_confirmation_button(

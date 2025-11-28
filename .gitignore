@@ -5,5 +5,5 @@ __pycache__/
 .vscode/
 sensitive_data/
 data_analytics_plan.md
-plan.md
+/plan.md
 da.ipynb

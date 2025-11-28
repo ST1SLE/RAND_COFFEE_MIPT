@@ -265,6 +265,7 @@ def get_user_details(user_id: int) -> dict:
                         "first_name": result[1],
                         "phystech_school": result[2],
                         "year_as_student": result[3],
+                        "coffee_streak": result[4] if result[4] else 0,
                     }
     except Exception as e:
         print(f"ERROR in get_user_details(): {e}")

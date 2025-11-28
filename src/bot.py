@@ -124,7 +124,11 @@ def build_inline_keyboard(buttons_data: list[tuple]) -> InlineKeyboardMarkup:
 async def show_main_menu_keyboard(
     update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
 ):
-    keyboard = [["☕️ Найти компанию"], ["📂 Мои заявки"], ["ℹ️ Гайд"]]
+    keyboard = [
+        ["☕️ Найти компанию"],
+        ["📂 Мои заявки", "🔥 Мой Coffee Streak"],
+        ["ℹ️ Гайд"],
+    ]
     reply_markup = ReplyKeyboardMarkup(
         keyboard, resize_keyboard=True, one_time_keyboard=False
     )
@@ -580,6 +584,47 @@ def escape_markdown(text: str) -> str:
     return text.replace("\\", "\\\\").translate(
         str.maketrans({c: f"\\{c}" for c in escape_chars})
     )
+
+
+async def show_my_streak(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_details = get_user_details(user_id)
+
+    if not user_details:
+        await update.message.reply_text("Произошла ошибка при получении данных.")
+        return
+
+    streak = user_details.get("coffee_streak", 0)
+
+    if streak == 0:
+        msg = (
+            "🔥 *Твой Coffee Streak: 0*\n\n"
+            "Ты пока не набрал серию. Чтобы зажечь огонек:\n"
+            "1. Сходи на встречу.\n"
+            "2. Подтверди участие.\n"
+            "3. Не отменяй в последний момент.\n\n"
+            "Вперед, за первой встречей! ☕️"
+        )
+    elif streak < 2:
+        msg = (
+            f"🔥 *Твой Coffee Streak: {streak}*\n\n"
+            "Отличное начало! Твой огонек виден другим пользователям.\n"
+            "Так держать! 🚀"
+        )
+    elif streak < 7:
+        msg = (
+            f"🔥 *Твой Coffee Streak: {streak}*\n\n"
+            "Ты — надежный партнер! Твой огонек виден другим пользователям, "
+            "и они знают, что с тобой точно стоит выпить кофе. 😎"
+        )
+    else:
+        msg = (
+            f"🔥🔥🔥 *Твой Coffee Streak: {streak}* 🔥🔥🔥\n\n"
+            "Да ты легенда нетворкинга! Твоей постоянности можно позавидовать. "
+            "Ты входишь в топ самых активных пользователей Физтеха. 🏆"
+        )
+
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1485,11 +1530,16 @@ async def auto_cancel_job(context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
+    MENU_REGEX = "^(☕️ Найти компанию|📂 Мои заявки|ℹ️ Гайд|🔥 Мой Coffee Streak)$"
+
     find_handler = MessageHandler(
         filters.Regex("^☕️ Найти компанию$"), find_company_start
     )
     my_requests_handler = MessageHandler(
         filters.Regex("^📂 Мои заявки$"), my_requests_start
+    )
+    my_streak_handler = MessageHandler(
+        filters.Regex("^🔥 Мой Coffee Streak$"), show_my_streak
     )
 
     registration_conv = ConversationHandler(
@@ -1512,6 +1562,7 @@ def main():
             CommandHandler("find", find_company_start),
             my_requests_handler,
             CommandHandler("my_coffee_requests", my_requests_start),
+            my_streak_handler,
         ],
         states={
             CHOOSING_ACTION: [
@@ -1564,6 +1615,7 @@ def main():
         fallbacks=[
             find_handler,
             my_requests_handler,
+            my_streak_handler,
             CommandHandler("cancel", cancel),
             CommandHandler("start", start),
         ],
@@ -1573,6 +1625,7 @@ def main():
 
     app.add_handler(registration_conv)
     app.add_handler(conv_handler)
+    app.add_handler(my_streak_handler)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
@@ -1593,11 +1646,7 @@ def main():
         )
     )
 
-    feedback_filter = (
-        filters.TEXT
-        & ~filters.COMMAND
-        & ~filters.Regex("^(☕️ Найти компанию|📂 Мои заявки|ℹ️ Гайд)$")
-    )
+    feedback_filter = filters.TEXT & ~filters.COMMAND & ~filters.Regex(MENU_REGEX)
     app.add_handler(MessageHandler(feedback_filter, process_feedback_text))
 
     logger.info(

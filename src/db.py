@@ -247,7 +247,8 @@ def get_user_details(user_id: int) -> dict:
         username,
         first_name,
         phystech_school,
-        year_as_student
+        year_as_student,
+        coffee_streak
     FROM
         users
     WHERE

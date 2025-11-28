@@ -32,7 +32,8 @@ CREATE TABLE users (
     phystech_school VARCHAR(50),
     year_as_student INTEGER,
     no_show_count INTEGER DEFAULT 0,
-    coffee_streak INTEGER DEFAULT 0;
+    coffee_streak INTEGER DEFAULT 0,
+    university_id INTEGER REFERENCES universities(id)
 );
 
 -- Таблица кофеен
@@ -41,8 +42,25 @@ CREATE TABLE coffee_shops (
     name VARCHAR(255) NOT NULL UNIQUE,
     description TEXT,
     working_hours JSONB,
-    is_active BOOLEAN DEFAULT true
+    is_active BOOLEAN DEFAULT true,
+    university_id INTEGER REFERENCES universities(id)
 );
+
+CREATE TABLE universities (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(50) UNIQUE NOT NULL, -- 'mipt', 'hse', 'msu' и т.д.
+    name VARCHAR(255) NOT NULL,
+    timezone VARCHAR(50) DEFAULT 'Europe/Moscow',
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+INSERT INTO universities (slug, name) VALUES 
+    ('mipt', 'МФТИ'),
+    ('hse', 'ВШЭ'),
+    ('misis', 'МИСиС'),
+    ('bmtsu', 'МГТУ им. Баумана'),
+    ('cu', 'Центральный Университет')
+ON CONFLICT (slug) DO NOTHING;
 
 -- Таблица заявок на кофе
 CREATE TABLE coffee_requests (
@@ -62,7 +80,8 @@ CREATE TABLE coffee_requests (
     feedback_text TEXT,
     is_confirmed_by_creator BOOLEAN DEFAULT FALSE,
     is_confirmed_by_partner BOOLEAN DEFAULT FALSE,
-    is_confirmation_sent BOOLEAN DEFAULT FALSE
+    is_confirmation_sent BOOLEAN DEFAULT FALSE,
+    university_id INTEGER REFERENCES universities(id)
 );
 
 CREATE TABLE cancellation_logs (
@@ -78,5 +97,13 @@ CREATE TABLE cancellation_logs (
 CREATE INDEX ON coffee_requests (creator_user_id);
 CREATE INDEX ON coffee_requests (partner_user_id);
 CREATE INDEX ON coffee_requests (status, meet_time);
+CREATE INDEX ON coffee_requests (university_id);
+
+CREATE INDEX idx_universities_slug ON universities(slug);
+
 CREATE INDEX ON cancellation_logs (request_id);
 CREATE INDEX ON cancellation_logs (user_id);
+
+CREATE INDEX ON users (university_id);
+
+CREATE INDEX ON coffee_shops (university_id);

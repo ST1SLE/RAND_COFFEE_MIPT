@@ -1261,7 +1261,22 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    admin_id = BOT_CONFIG.get("admin_id", 0)
+   admin_env_key = BOT_CONFIG.get("admin_id_env")
+    if not admin_env_key:
+        logger.warning("Config is missing 'admin_id_env'")
+        return
+
+    admin_id_str = os.getenv(admin_env_key)
+    if not admin_id_str:
+        logger.warning(f"Env variable {admin_env_key} is empty or missing")
+        return
+
+    try:
+        admin_id = int(admin_id_str)
+    except ValueError:
+        logger.error(f"Admin ID in {admin_env_key} is not a valid number")
+        return
+
     if update.effective_user.id != admin_id:
         return
 

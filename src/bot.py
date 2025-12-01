@@ -58,6 +58,7 @@ from db import (
     is_user_active,
     increment_streaks,
     reset_user_streak,
+    init_db_pool,
 )
 
 load_dotenv()
@@ -144,8 +145,9 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    uni_id = BOT_CONFIG["university_id"]
 
-    if not is_user_active(user.id):
+    if not is_user_active(user.id, uni_id=uni_id):
         await update.message.reply_text(
             "🚫 *Ваш аккаунт заблокирован.*\n\n"
             "К сожалению, вы слишком часто пропускали встречи без предупреждения. "
@@ -279,7 +281,7 @@ async def post_init(app):
 
 async def find_company_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
-    if not is_user_active(update.effective_user.id):
+    if not is_user_active(update.effective_user.id, uni_id=BOT_CONFIG["university_id"]):
         if update.callback_query:
             await update.callback_query.answer("Вы заблокированы 🚫", show_alert=True)
         else:
@@ -1129,7 +1131,9 @@ async def request_feedback(context: ContextTypes.DEFAULT_TYPE):
                 f"Failed to send feedback req to partner {partner_id} (req {request_id}): {e}"
             )
 
-        success = mark_feedback_as_requested(request_id)
+        success = mark_feedback_as_requested(
+            request_id, uni_id=BOT_CONFIG["university_id"]
+        )
         if success:
             logger.info(f"Marked feedback as requested for request_id: {request_id}")
         else:
@@ -1170,8 +1174,9 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif outcome_str == "creator_no_show":
         final_outcome = "creator_no_show" if is_creator else "partner_no_show"
 
+    uni_id = BOT_CONFIG["university_id"]
     if final_outcome:
-        is_first_update = save_meeting_outcome(request_id, final_outcome)
+        is_first_update = save_meeting_outcome(request_id, final_outcome, uni_id=uni_id)
 
         if final_outcome in ["partner_no_show", "creator_no_show"]:
             guilty_id = None
@@ -1181,9 +1186,9 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 guilty_id = details["creator_user_id"]
 
             if guilty_id and is_first_update:
-                reset_user_streak(guilty_id)
+                reset_user_streak(guilty_id, uni_id=uni_id)
 
-                new_count = increment_no_show_counter(guilty_id)
+                new_count = increment_no_show_counter(guilty_id, uni_id=uni_id)
                 logger.info(f"User {guilty_id} no_show_count increased to {new_count}")
 
                 if new_count == 2:
@@ -1201,7 +1206,7 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         logger.warning(f"Could not send warning to {guilty_id}: {e}")
 
                 elif new_count >= 3:
-                    ban_user(guilty_id)
+                    ban_user(guilty_id, uni_id=uni_id)
                     logger.warning(f"BANNED user {guilty_id} (no_shows: {new_count})")
                     try:
                         await context.bot.send_message(
@@ -1221,7 +1226,7 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif final_outcome == "attended":
             if is_first_update:
-                increment_streaks(request_id)
+                increment_streaks(request_id, uni_id=uni_id)
                 logger.info(f"Streaks incremented for request {request_id}")
 
             context.user_data["awaiting_feedback_id"] = request_id
@@ -1323,7 +1328,7 @@ async def process_feedback_text(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data.pop("awaiting_feedback_id", None)
         return
 
-    save_feedback_text(request_id, user_text)
+    save_feedback_text(request_id, user_text, uni_id=BOT_CONFIG["university_id"])
     context.user_data.pop("awaiting_feedback_id", None)
 
     await update.message.reply_text("Спасибо! Твой отзыв записан. ❤️")
@@ -1556,6 +1561,8 @@ def main():
 
     global BOT_CONFIG
     BOT_CONFIG = load_config(args.config)
+
+    init_db_pool()
 
     token_env_key = BOT_CONFIG.get("TELEGRAM_BOT_TOKEN")
     token = os.getenv(token_env_key)

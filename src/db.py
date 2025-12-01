@@ -1,6 +1,7 @@
 import os
 import psycopg2
 import psycopg2.extras
+from psycopg2 import pool
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from dotenv import load_dotenv
@@ -8,25 +9,46 @@ import json
 
 load_dotenv()
 
+DB_POOL = None
 
-@contextmanager
-def get_db_connection():
-    conn = None
+
+def init_db_pool():
+    global DB_POOL
     try:
-        conn = psycopg2.connect(
+        DB_POOL = pool.SimpleConnectionPool(
+            minconn=1,
+            maxconn=10,
             host=os.getenv("DB_HOST"),
             database=os.getenv("DB_NAME"),
             user=os.getenv("DB_USER"),
             password=os.getenv("DB_PASS"),
             port=os.getenv("DB_PORT"),
         )
+        print("Database connection pool created successfully.")
+    except Exception as e:
+        print(f"Error creating connection pool: {e}")
+        raise
+
+
+@contextmanager
+def get_db_connection():
+    global DB_POOL
+    if not DB_POOL:
+        init_db_pool()
+
+    conn = None
+    try:
+        conn = DB_POOL.getconn()
         yield conn
     except psycopg2.OperationalError as e:
-        print(f"Error connecting to database: {e}")
+        print(f"OperationalError in DB connection: {e}")
+        raise
+    except Exception as e:
+        print(f"General DB Error: {e}")
         raise
     finally:
         if conn:
-            conn.close()
+            DB_POOL.putconn(conn)
 
 
 def add_or_update_user(user_id: int, username: str, first_name: str, uni_id: int):
@@ -185,31 +207,33 @@ def get_pending_requests(user_id: int, uni_id: int) -> list:
         return []
 
 
-def increment_streaks(request_id: int):
+def increment_streaks(request_id: int, uni_id: int):
     sql = """
     UPDATE users
     SET coffee_streak = coffee_streak + 1
     WHERE user_id IN (
-        SELECT creator_user_id FROM coffee_requests WHERE request_id = %s
+        SELECT creator_user_id FROM coffee_requests WHERE request_id = %s AND university_id = %s
         UNION
-        SELECT partner_user_id FROM coffee_requests WHERE request_id = %s
-    );
+        SELECT partner_user_id FROM coffee_requests WHERE request_id = %s AND university_id = %s
+    ) AND university_id = %s;
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (request_id, request_id))
+                cur.execute(sql, (request_id, uni_id, request_id, uni_id, uni_id))
                 conn.commit()
     except Exception as e:
         print(f"ERROR in increment_streaks: {e}")
 
 
-def reset_user_streak(user_id: int):
-    sql = "UPDATE users SET coffee_streak = 0 WHERE user_id = %s;"
+def reset_user_streak(user_id: int, uni_id: int):
+    sql = (
+        "UPDATE users SET coffee_streak = 0 WHERE user_id = %s AND university_id = %s;"
+    )
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (user_id,))
+                cur.execute(sql, (user_id, uni_id))
                 conn.commit()
     except Exception as e:
         print(f"ERROR in reset_user_streak: {e}")
@@ -602,21 +626,22 @@ def get_meetings_for_reminder(uni_id: int) -> list:
     return meetings
 
 
-def mark_reminder_as_sent(request_id: int) -> bool:
+def mark_reminder_as_sent(request_id: int, uni_id: int) -> bool:
     sql = """
     UPDATE
         coffee_requests
     SET
         is_reminder_sent = TRUE
     WHERE
-        request_id = %s;
+        request_id = %s
+        AND university_id = %s;
     """
     success = False
 
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (request_id,))
+                cur.execute(sql, (request_id, uni_id))
                 if cur.rowcount == 1:
                     conn.commit()
                     success = True
@@ -655,13 +680,13 @@ def get_meetings_to_confirm(uni_id: int) -> list:
     return meetings
 
 
-def confirm_meeting_participation(request_id: int, user_id: int) -> bool:
+def confirm_meeting_participation(request_id: int, user_id: int, uni_id: int) -> bool:
     sql = """
     UPDATE coffee_requests
     SET 
         is_confirmed_by_creator = CASE WHEN creator_user_id = %s THEN TRUE ELSE is_confirmed_by_creator END,
         is_confirmed_by_partner = CASE WHEN partner_user_id = %s THEN TRUE ELSE is_confirmed_by_partner END
-    WHERE request_id = %s
+    WHERE request_id = %s  AND university_id = %s
     RETURNING is_confirmed_by_creator, is_confirmed_by_partner;
     """
 
@@ -669,7 +694,7 @@ def confirm_meeting_participation(request_id: int, user_id: int) -> bool:
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (user_id, user_id, request_id))
+                cur.execute(sql, (user_id, user_id, request_id, uni_id))
                 result = cur.fetchone()
                 conn.commit()
 
@@ -683,18 +708,18 @@ def confirm_meeting_participation(request_id: int, user_id: int) -> bool:
     return both_confirmed
 
 
-def increment_no_show_counter(user_id: int) -> int:
+def increment_no_show_counter(user_id: int, uni_id: int) -> int:
     sql = """
     UPDATE users 
     SET no_show_count = no_show_count + 1 
-    WHERE user_id = %s
+    WHERE user_id = %s AND university_id = %s
     RETURNING no_show_count;
     """
     new_count = 0
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (user_id,))
+                cur.execute(sql, (user_id, uni_id))
                 result = cur.fetchone()
                 if result:
                     new_count = result[0]
@@ -792,15 +817,13 @@ def get_meetings_for_feedback(uni_id: int) -> list:
         return []
 
 
-def mark_feedback_as_requested(request_id: int) -> bool:
-    sql = (
-        "UPDATE coffee_requests SET is_feedback_requested = TRUE WHERE request_id = %s;"
-    )
+def mark_feedback_as_requested(request_id: int, uni_id: int) -> bool:
+    sql = "UPDATE coffee_requests SET is_feedback_requested = TRUE WHERE request_id = %s AND university_id = %s;"
     success = False
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (request_id,))
+                cur.execute(sql, (request_id, uni_id))
                 if cur.rowcount == 1:
                     conn.commit()
                     success = True
@@ -809,29 +832,31 @@ def mark_feedback_as_requested(request_id: int) -> bool:
     return success
 
 
-def save_feedback_text(request_id: int, text: str):
-    sql = "UPDATE coffee_requests SET feedback_text = %s WHERE request_id = %s;"
+def save_feedback_text(request_id: int, text: str, uni_id: int):
+    sql = "UPDATE coffee_requests SET feedback_text = %s WHERE request_id = %s AND university_id = %s;"
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (text, request_id))
+                cur.execute(sql, (text, request_id, uni_id))
                 conn.commit()
     except Exception as e:
         print(f"ERROR in save_feedback_text(): {e}")
 
 
-def save_meeting_outcome(request_id: int, outcome: str) -> bool:
+def save_meeting_outcome(request_id: int, outcome: str, uni_id: int) -> bool:
     sql = """
     UPDATE coffee_requests 
     SET meeting_outcome = %s 
-    WHERE request_id = %s AND meeting_outcome IS NULL
+    WHERE request_id = %s
+        AND university_id = %s
+        AND meeting_outcome IS NULL
     RETURNING request_id;
     """
     success = False
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (outcome, request_id))
+                cur.execute(sql, (outcome, request_id, uni_id))
                 if cur.fetchone():
                     conn.commit()
                     success = True
@@ -840,23 +865,31 @@ def save_meeting_outcome(request_id: int, outcome: str) -> bool:
     return success
 
 
-def ban_user(user_id: int):
-    sql = "UPDATE users SET is_active = FALSE WHERE user_id = %s;"
+def ban_user(user_id: int, uni_id: int):
+    sql = (
+        "UPDATE users SET is_active = FALSE WHERE user_id = %s AND university_id = %s;"
+    )
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (user_id,))
+                cur.execute(sql, (user_id, uni_id))
                 conn.commit()
     except Exception as e:
         print(f"ERROR in ban_user: {e}")
 
 
-def is_user_active(user_id: int) -> bool:
-    sql = "SELECT is_active FROM users WHERE user_id = %s;"
+def is_user_active(user_id: int, uni_id=None) -> bool:
+    if uni_id:
+        sql = "SELECT is_active FROM users WHERE user_id = %s AND university_id = %s;"
+        params = (user_id, uni_id)
+    else:
+        sql = "SELECT is_active FROM users WHERE user_id = %s;"
+        params = (user_id,)
+
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (user_id,))
+                cur.execute(sql, params)
                 result = cur.fetchone()
                 if result:
                     return result[0]

@@ -1564,7 +1564,7 @@ def main():
 
     init_db_pool()
 
-    token_env_key = BOT_CONFIG.get("TELEGRAM_BOT_TOKEN")
+    token_env_key = BOT_CONFIG.get("bot_token_env")
     token = os.getenv(token_env_key)
 
     if not token:

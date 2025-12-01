@@ -29,14 +29,15 @@ def get_db_connection():
             conn.close()
 
 
-def add_or_update_user(user_id: int, username: str, first_name: str):
+def add_or_update_user(user_id: int, username: str, first_name: str, uni_id: int):
     sql = """
-    INSERT into users (user_id, username, first_name, is_active, created_at, last_seen)
-    VALUES (%s,%s,%s,TRUE,%s,%s)
+    INSERT into users (user_id, username, first_name, is_active, created_at, last_seen, university_id)
+    VALUES (%s,%s,%s,TRUE,%s,%s, %s)
     ON CONFLICT (user_id) DO UPDATE SET
         username = EXCLUDED.username,
         first_name = EXCLUDED.first_name,
-        last_seen = EXCLUDED.last_seen;
+        last_seen = EXCLUDED.last_seen,
+        university_id = EXCLUDED.university_id;
     """
 
     now = datetime.now()
@@ -44,62 +45,65 @@ def add_or_update_user(user_id: int, username: str, first_name: str):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (user_id, username, first_name, now, now))
+                cur.execute(sql, (user_id, username, first_name, now, now, uni_id))
                 conn.commit()
     except Exception as e:
         print(f"DB ERROR in add_or_update_user: {e}")
 
 
-def add_coffee_shop(shop_id: int, name: str, description: str, working_hours: str):
+def add_coffee_shop(
+    shop_id: int, name: str, description: str, working_hours: str, uni_id: int
+):
     sql = """
-    INSERT into coffee_shops (shop_id, name, description, working_hours, is_active)
-    VALUES (%s, %s, %s, %s, TRUE)
+    INSERT into coffee_shops (shop_id, name, description, working_hours, is_active, university_id)
+    VALUES (%s, %s, %s, %s, TRUE, %s)
     on CONFLICT (shop_id) DO UPDATE SET
         name = EXCLUDED.name,
         description = EXCLUDED.description,
         working_hours = EXCLUDED.working_hours,
-        is_active = TRUE;
+        is_active = TRUE,
+        university_id = EXCLUDED.university_id;
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (shop_id, name, description, working_hours))
+                cur.execute(sql, (shop_id, name, description, working_hours, uni_id))
                 conn.commit()
     except Exception as e:
         print(f"DB ERROR in add_coffee_shop: {e}")
 
 
-def get_active_coffee_shops() -> list:
-    sql = "SELECT shop_id, name FROM coffee_shops WHERE is_active = TRUE ORDER BY name;"
+def get_active_coffee_shops(uni_id: int) -> list:
+    sql = "SELECT shop_id, name FROM coffee_shops WHERE is_active = TRUE AND university_id = %s ORDER BY name;"
 
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql)
+                cur.execute(sql, (uni_id,))
                 return cur.fetchall()
     except Exception as e:
         print(f"error in get_active_coffee_shops(): {e}")
         return []
 
 
-def get_all_active_users() -> list:
-    sql = "SELECT user_id FROM users WHERE is_active = TRUE;"
+def get_all_active_users(uni_id: int) -> list:
+    sql = "SELECT user_id FROM users WHERE is_active = TRUE AND university_id = %s;"
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql)
+                cur.execute(sql, (uni_id,))
                 return [row[0] for row in cur.fetchall()]
     except Exception as e:
         print(f"ERROR in get_all_active_users: {e}")
         return []
 
 
-def get_shop_details(shop_id: int) -> dict:
-    sql = "SELECT name, description FROM coffee_shops WHERE shop_id = %s;"
+def get_shop_details(shop_id: int, uni_id: int) -> dict:
+    sql = "SELECT name, description FROM coffee_shops WHERE shop_id = %s AND university_id = %s;"
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql, (shop_id,))
+                cur.execute(sql, (shop_id, uni_id))
                 result = cur.fetchone()
                 return result if result else {}
     except Exception as e:
@@ -107,12 +111,12 @@ def get_shop_details(shop_id: int) -> dict:
         return {}
 
 
-def get_shop_working_hours(shop_id: int) -> dict:
-    sql = "SELECT working_hours FROM coffee_shops WHERE shop_id = %s;"
+def get_shop_working_hours(shop_id: int, uni_id: int) -> dict:
+    sql = "SELECT working_hours FROM coffee_shops WHERE shop_id = %s AND university_id = %s;"
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql, (shop_id,))
+                cur.execute(sql, (shop_id, uni_id))
                 result = cur.fetchone()
                 if result:
                     return result["working_hours"]
@@ -122,7 +126,9 @@ def get_shop_working_hours(shop_id: int) -> dict:
         return {}
 
 
-def create_coffee_request(creator_user_id: int, shop_id: int, meet_time: datetime):
+def create_coffee_request(
+    creator_user_id: int, shop_id: int, meet_time: datetime, uni_id: int
+):
     sql = """INSERT INTO coffee_requests (
         creator_user_id,
         shop_id,
@@ -130,15 +136,16 @@ def create_coffee_request(creator_user_id: int, shop_id: int, meet_time: datetim
         status,
         created_at,
         is_reminder_sent,
-        is_failure_notification_sent
+        is_failure_notification_sent,
+        university_id
     )
-    VALUES (%s, %s, %s, 'pending', %s, FALSE, FALSE)
+    VALUES (%s, %s, %s, 'pending', %s, FALSE, FALSE, %s)
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 now_utc = datetime.now(timezone.utc)
-                cur.execute(sql, (creator_user_id, shop_id, meet_time, now_utc))
+                cur.execute(sql, (creator_user_id, shop_id, meet_time, now_utc, uni_id))
                 conn.commit()
                 print(
                     f"SUCCESS in creating coffee request for user with id: {creator_user_id}"
@@ -147,7 +154,7 @@ def create_coffee_request(creator_user_id: int, shop_id: int, meet_time: datetim
         print(f"error in create_coffee_request(): {e}")
 
 
-def get_pending_requests(user_id: int) -> list:
+def get_pending_requests(user_id: int, uni_id: int) -> list:
     sql = """
     SELECT
         r.request_id,
@@ -164,13 +171,14 @@ def get_pending_requests(user_id: int) -> list:
         r.status = 'pending'
         AND r.creator_user_id != %s
         AND r.meet_time > NOW()
+        AND r.university_id = %s
     ORDER BY
         r.meet_time ASC;
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (user_id,))
+                cur.execute(sql, (user_id, uni_id))
                 return cur.fetchall()
     except Exception as e:
         print(f"ERROR in get_pending_requests(): {e}")
@@ -291,7 +299,7 @@ def update_user_profile(user_id: int, school: str, year: int | None):
         print(f"ERROR in update_user_profile(): {e}")
 
 
-def get_user_requests(user_id: int) -> list:
+def get_user_requests(user_id: int, uni_id: int) -> list:
     sql = """
     SELECT
         r.request_id,
@@ -314,31 +322,29 @@ def get_user_requests(user_id: int) -> list:
         users as partner ON r.partner_user_id = partner.user_id
     WHERE
         (r.creator_user_id = %s OR r.partner_user_id = %s)
+        AND r.university_id = %s
         AND (
-            -- 1. Показываем все будущие встречи (pending и matched)
             (r.status IN ('pending', 'matched') AND r.meet_time > NOW())
             OR
-            -- 2. Показываем завершенные встречи (matched) за последние 2 дня
             (r.status = 'matched' AND r.meet_time BETWEEN NOW() - INTERVAL '2 days' AND NOW())
             OR
-            -- 3. Показываем отмененные встречи (cancelled) за последний час
             (r.status = 'cancelled' AND r.created_at > NOW() - INTERVAL '1 hour')
         )
     ORDER BY
-        r.meet_time DESC; -- Изменено на DESC для показа самых свежих встреч первыми
+        r.meet_time DESC;
     """
 
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql, (user_id, user_id))
+                cur.execute(sql, (user_id, user_id, uni_id))
                 return cur.fetchall()
     except Exception as e:
         print(f"ERROR in get_user_requests(): {e}")
         return []
 
 
-def pair_user_for_request(request_id: int, partner_user_id: int) -> bool:
+def pair_user_for_request(request_id: int, partner_user_id: int, uni_id: int) -> bool:
     success = False
     sql = """
     UPDATE coffee_requests
@@ -360,7 +366,8 @@ def pair_user_for_request(request_id: int, partner_user_id: int) -> bool:
     WHERE
         request_id = %s 
         AND status = 'pending' 
-        AND partner_user_id IS NULL;
+        AND partner_user_id IS NULL
+        AND university_id = %s;
     """
 
     try:
@@ -368,10 +375,7 @@ def pair_user_for_request(request_id: int, partner_user_id: int) -> bool:
             with conn.cursor() as cur:
                 cur.execute(
                     sql,
-                    (
-                        partner_user_id,
-                        request_id,
-                    ),
+                    (partner_user_id, request_id, uni_id),
                 )
 
                 if cur.rowcount == 1:
@@ -395,7 +399,7 @@ def log_cancellation_event(conn, request_id: int, user_id: int, event_type: str)
         cur.execute(sql, (request_id, user_id, event_type))
 
 
-def cancel_request(request_id: int, user_id: int) -> bool:
+def cancel_request(request_id: int, user_id: int, uni_id: int) -> bool:
     success = False
     sql = """
     UPDATE
@@ -405,13 +409,14 @@ def cancel_request(request_id: int, user_id: int) -> bool:
     WHERE
         request_id = %s
         AND creator_user_id = %s
+        AND university_id = %s
         AND status = 'pending';
     """
 
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (request_id, user_id))
+                cur.execute(sql, (request_id, user_id, uni_id))
                 if cur.rowcount == 1:
                     log_cancellation_event(
                         conn, request_id, user_id, "creator_cancel_pending"
@@ -427,25 +432,32 @@ def cancel_request(request_id: int, user_id: int) -> bool:
     return success
 
 
-def cancel_request_by_creator(request_id: int, creator_user_id: int) -> int | None:
-    check_sql = (
-        "SELECT is_confirmed_by_creator FROM coffee_requests WHERE request_id = %s"
-    )
+def cancel_request_by_creator(
+    request_id: int, creator_user_id: int, uni_id: int
+) -> int | None:
+    check_sql = """
+        SELECT is_confirmed_by_creator 
+        FROM coffee_requests 
+        WHERE request_id = %s AND university_id = %s
+    """
     update_sql = """
     UPDATE coffee_requests
     SET status = 'cancelled'
-    WHERE request_id = %s AND creator_user_id = %s AND status = 'matched'
+    WHERE request_id = %s 
+      AND creator_user_id = %s 
+      AND status = 'matched'
+      AND university_id = %s
     RETURNING partner_user_id;
     """
 
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(check_sql, (request_id,))
+                cur.execute(check_sql, (request_id, uni_id))
                 res = cur.fetchone()
                 should_reset_streak = res[0] if res else False
 
-                cur.execute(update_sql, (request_id, creator_user_id))
+                cur.execute(update_sql, (request_id, creator_user_id, uni_id))
                 if cur.rowcount == 1:
                     partner_id = cur.fetchone()[0]
 
@@ -468,24 +480,29 @@ def cancel_request_by_creator(request_id: int, creator_user_id: int) -> int | No
         return None
 
 
-def unmatch_request(request_id: int, partner_user_id: int) -> int | None:
-    check_sql = (
-        "SELECT is_confirmed_by_partner FROM coffee_requests WHERE request_id = %s"
-    )
+def unmatch_request(request_id: int, partner_user_id: int, uni_id: int) -> int | None:
+    check_sql = """
+        SELECT is_confirmed_by_partner 
+        FROM coffee_requests 
+        WHERE request_id = %s AND university_id = %s
+    """
     update_sql = """
     UPDATE coffee_requests
     SET status = 'pending', partner_user_id = NULL
-    WHERE request_id = %s AND partner_user_id = %s AND status = 'matched'
+    WHERE request_id = %s 
+      AND partner_user_id = %s 
+      AND status = 'matched'
+      AND university_id = %s
     RETURNING creator_user_id;
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(check_sql, (request_id,))
+                cur.execute(check_sql, (request_id, uni_id))
                 res = cur.fetchone()
                 should_reset_streak = res[0] if res else False
 
-                cur.execute(update_sql, (request_id, partner_user_id))
+                cur.execute(update_sql, (request_id, partner_user_id, uni_id))
                 if cur.rowcount == 1:
                     creator_id = cur.fetchone()[0]
 
@@ -508,7 +525,7 @@ def unmatch_request(request_id: int, partner_user_id: int) -> int | None:
         return None
 
 
-def get_meetings_for_icebreaker() -> list:
+def get_meetings_for_icebreaker(uni_id: int) -> list:
     sql = """
     UPDATE coffee_requests
     SET is_icebreaker_sent = TRUE
@@ -521,6 +538,7 @@ def get_meetings_for_icebreaker() -> list:
             AND is_confirmed_by_creator = TRUE
             AND is_confirmed_by_partner = TRUE
             AND meet_time BETWEEN NOW() AND NOW() + INTERVAL '7 minutes'
+            AND university_id = %s
         FOR UPDATE SKIP LOCKED
     )
     RETURNING
@@ -534,7 +552,7 @@ def get_meetings_for_icebreaker() -> list:
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql)
+                cur.execute(sql, (uni_id,))
                 meetings = cur.fetchall()
                 conn.commit()
     except Exception as e:
@@ -543,7 +561,7 @@ def get_meetings_for_icebreaker() -> list:
     return meetings
 
 
-def get_meetings_for_reminder() -> list:
+def get_meetings_for_reminder(uni_id: int) -> list:
     sql = """
     UPDATE coffee_requests
     SET is_reminder_sent = TRUE
@@ -556,6 +574,7 @@ def get_meetings_for_reminder() -> list:
             AND is_confirmed_by_creator = TRUE
             AND is_confirmed_by_partner = TRUE
             AND meet_time BETWEEN NOW() AND NOW() + INTERVAL '20 minutes'
+            AND university_id = %s
         FOR UPDATE SKIP LOCKED
     )
     RETURNING
@@ -574,7 +593,7 @@ def get_meetings_for_reminder() -> list:
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql)
+                cur.execute(sql, (uni_id,))
                 meetings = cur.fetchall()
                 conn.commit()
     except Exception as e:
@@ -607,7 +626,7 @@ def mark_reminder_as_sent(request_id: int) -> bool:
     return success
 
 
-def get_meetings_to_confirm() -> list:
+def get_meetings_to_confirm(uni_id: int) -> list:
     sql = """
     UPDATE coffee_requests
     SET is_confirmation_sent = TRUE
@@ -619,6 +638,7 @@ def get_meetings_to_confirm() -> list:
             AND is_confirmation_sent = FALSE
             AND meet_time > NOW()
             AND meet_time < (NOW() + INTERVAL '130 minutes')
+            AND university_id = %s
         FOR UPDATE SKIP LOCKED
     )
     RETURNING request_id, creator_user_id, partner_user_id, meet_time;
@@ -627,7 +647,7 @@ def get_meetings_to_confirm() -> list:
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql)
+                cur.execute(sql, (uni_id,))
                 meetings = cur.fetchall()
                 conn.commit()
     except Exception as e:
@@ -684,7 +704,7 @@ def increment_no_show_counter(user_id: int) -> int:
     return new_count
 
 
-def cancel_unconfirmed_matches() -> list:
+def cancel_unconfirmed_matches(uni_id: int) -> list:
     sql = """
     UPDATE coffee_requests r
     SET status = 'cancelled'
@@ -693,8 +713,8 @@ def cancel_unconfirmed_matches() -> list:
       AND r.status = 'matched'
       AND r.meet_time < (NOW() + INTERVAL '25 minutes')
       AND r.meet_time > (NOW() - INTERVAL '1 hour') 
-
       AND (r.is_confirmed_by_creator = FALSE OR r.is_confirmed_by_partner = FALSE)
+      AND r.university_id = %s
     RETURNING
         r.request_id,
         r.creator_user_id,
@@ -707,7 +727,7 @@ def cancel_unconfirmed_matches() -> list:
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql)
+                cur.execute(sql, (uni_id,))
                 cancelled_meetings = cur.fetchall()
                 conn.commit()
     except Exception as e:
@@ -715,7 +735,7 @@ def cancel_unconfirmed_matches() -> list:
     return cancelled_meetings
 
 
-def expire_pending_requests() -> list:
+def expire_pending_requests(uni_id: int) -> list:
     sql = """
     UPDATE
         coffee_requests r
@@ -729,6 +749,7 @@ def expire_pending_requests() -> list:
         AND r.status = 'pending'
         AND r.meet_time < (NOW() + INTERVAL '10 minutes')
         AND r.is_failure_notification_sent = FALSE
+        AND r.university_id = %s
     RETURNING
         r.request_id, r.creator_user_id, s.name as shop_name, r.meet_time;
     """
@@ -738,7 +759,7 @@ def expire_pending_requests() -> list:
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql)
+                cur.execute(sql, (uni_id,))
                 conn.commit()
                 expired_requests = cur.fetchall()
     except Exception as e:
@@ -747,7 +768,7 @@ def expire_pending_requests() -> list:
     return expired_requests
 
 
-def get_meetings_for_feedback() -> list:
+def get_meetings_for_feedback(uni_id: int) -> list:
     sql = """
     SELECT
         r.request_id, r.creator_user_id, r.partner_user_id, s.name as shop_name, r.meet_time
@@ -758,12 +779,13 @@ def get_meetings_for_feedback() -> list:
         AND r.is_feedback_requested = FALSE
         AND r.is_confirmed_by_creator = TRUE
         AND r.is_confirmed_by_partner = TRUE
-        AND r.meet_time < (NOW() - INTERVAL '30 minutes');
+        AND r.meet_time < (NOW() - INTERVAL '30 minutes')
+        AND r.university_id = %s;
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql)
+                cur.execute(sql, (uni_id,))
                 return cur.fetchall()
     except Exception as e:
         print(f"ERROR in get_meetings_for_feedback(): {e}")

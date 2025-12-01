@@ -4,6 +4,8 @@ import re
 import asyncio
 import random
 import html
+import argparse
+import json
 from datetime import datetime, time, timezone, timedelta
 from telegram import (
     Update,
@@ -59,7 +61,7 @@ from db import (
 )
 
 load_dotenv()
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BOT_CONFIG = {}
 
 MOSCOW_TIMEZONE = timezone(timedelta(hours=3), name="Europe/Moscow")
 
@@ -79,14 +81,6 @@ logger = logging.getLogger(__name__)
     REGISTER_SCHOOL,
     REGISTER_YEAR,
 ) = range(9)
-
-SCHOOLS_LIST = [
-    ["ФРКТ", "ВШПИ", "ЛФИ"],
-    ["ФАКТ", "ФЭФМ", "ФПМИ"],
-    ["ФБМФ", "КНТ", "ШИР"],
-    ["Никакая из них"],
-]
-YEARS_LIST = [["1", "2", "3", "4"], ["5", "6", "7", "8"], ["Вернуться назад"]]
 
 STATUS_CONFIG = {
     "pending": {
@@ -161,9 +155,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     logger.info(f"User: {user.username} (ID: {user.id}) started bot.")
+
     add_or_update_user(
-        user_id=user.id, first_name=user.first_name, username=user.username
+        user_id=user.id,
+        first_name=user.first_name,
+        username=user.username,
+        uni_id=BOT_CONFIG["university_id"],
     )
+
     user_details = get_user_details(user.id)
     if user_details and user_details.get("phystech_school"):
         welcome_text = (
@@ -173,11 +172,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu_keyboard(update, context, text=welcome_text)
         return ConversationHandler.END
 
+    schools = BOT_CONFIG["schools"]
+
     await update.message.reply_text(
         "Привет! 👋 Перед тем как начать, давай познакомимся.\n\n"
-        "Из какой ты Физтех-школы?",
+        "С какого ты факультета?",
         reply_markup=ReplyKeyboardMarkup(
-            SCHOOLS_LIST, one_time_keyboard=True, resize_keyboard=True
+            schools, one_time_keyboard=True, resize_keyboard=True
         ),
     )
     return REGISTER_SCHOOL
@@ -186,14 +187,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def register_school(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     school = update.message.text
 
-    flat_schools = [item for sublist in SCHOOLS_LIST for item in sublist]
+    schools_list = BOT_CONFIG["schools"]
+    flat_schools = [item for sublist in schools_list for item in sublist]
     if school not in flat_schools:
         await update.message.reply_text("Пожалуйста, выбери вариант, используя кнопки.")
         return REGISTER_SCHOOL
 
     context.user_data["reg_school"] = school
 
-    if school == "Никакая из них":
+    if school == "Никакой из них":
         user_id = update.effective_user.id
         update_user_profile(user_id, school="External", year=None)
 
@@ -204,10 +206,11 @@ async def register_school(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return ConversationHandler.END
 
+    years_list = BOT_CONFIG["years"]
     await update.message.reply_text(
         f"Отлично, {school}! А на каком ты курсе?",
         reply_markup=ReplyKeyboardMarkup(
-            YEARS_LIST, one_time_keyboard=True, resize_keyboard=True
+            years_list, one_time_keyboard=True, resize_keyboard=True
         ),
     )
     return REGISTER_YEAR
@@ -217,10 +220,11 @@ async def register_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     year_str = update.message.text
 
     if year_str == "Вернуться назад":
+        schools_list = BOT_CONFIG["schools"]
         await update.message.reply_text(
-            "Хорошо, давай выберем школу заново.",
+            "Хорошо, давай выберем факультет заново.",
             reply_markup=ReplyKeyboardMarkup(
-                SCHOOLS_LIST, one_time_keyboard=True, resize_keyboard=True
+                schools_list, one_time_keyboard=True, resize_keyboard=True
             ),
         )
         return REGISTER_SCHOOL
@@ -314,7 +318,7 @@ async def show_shop_details(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
 
     shop_id = int(query.data.split("_")[1])
-    shop_details = get_shop_details(shop_id=shop_id)
+    shop_details = get_shop_details(shop_id=shop_id, uni_id=BOT_CONFIG["university_id"])
 
     if not shop_details:
         await query.edit_message_text(
@@ -350,7 +354,7 @@ async def create_request_step1_shop(
     query = update.callback_query
     await query.answer()
 
-    shops = get_active_coffee_shops()
+    shops = get_active_coffee_shops(uni_id=BOT_CONFIG["university_id"])
     if not shops:
         await query.edit_message_text(
             text="К сожалению сейчас не нашлись активные кофейни, попробуй позже. 😉"
@@ -522,10 +526,11 @@ async def create_request_step4_validate(
         )
         return ConversationHandler.END
 
-    working_hours = get_shop_working_hours(shop_id=shop_id)
+    uni_id = BOT_CONFIG["university_id"]
+    working_hours = get_shop_working_hours(shop_id=shop_id, uni_id=uni_id)
     if is_shop_open_at_time(working_hours, meet_time):
         create_coffee_request(
-            creator_user_id=user.id, shop_id=shop_id, meet_time=meet_time
+            creator_user_id=user.id, shop_id=shop_id, meet_time=meet_time, uni_id=uni_id
         )
         success_text = "Готово! ✨\n\n Твоя заявка в игре. Как только кто-то откликнется, я пришлю уведомление. 🔔"
         await show_main_menu_keyboard(update, context, text=success_text)
@@ -544,7 +549,7 @@ async def view_available_requests(
     await query.answer()
 
     user_id = update.effective_user.id
-    requests = get_pending_requests(user_id)
+    requests = get_pending_requests(user_id, uni_id=BOT_CONFIG["university_id"])
 
     if not requests:
         reply_markup = build_inline_keyboard(
@@ -629,7 +634,7 @@ async def show_my_streak(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     user_id = update.effective_user.id
-    requests = get_user_requests(user_id=user_id)
+    requests = get_user_requests(user_id=user_id, uni_id=BOT_CONFIG["university_id"])
 
     keyboard_rows = []
 
@@ -740,7 +745,9 @@ async def handle_accept_request(
     logger.info(f"User {partner_user_id} is attempting to accept request {request_id}")
 
     success = pair_user_for_request(
-        request_id=request_id, partner_user_id=partner_user_id
+        request_id=request_id,
+        partner_user_id=partner_user_id,
+        uni_id=BOT_CONFIG["university_id"],
     )
 
     if success:
@@ -774,7 +781,9 @@ async def handle_cancel_request(
 
     logger.info(f"User {user_id} is attempting to cancel request {request_id}.")
 
-    success = cancel_request(request_id=request_id, user_id=user_id)
+    success = cancel_request(
+        request_id=request_id, user_id=user_id, uni_id=BOT_CONFIG["university_id"]
+    )
 
     if success:
         await query.edit_message_text(text="✅ Заявка успешно отменена.")
@@ -801,7 +810,9 @@ async def handle_cancel_request_as_creator(
 
     request_details = get_request_details(request_id=request_id)
     partner_id = cancel_request_by_creator(
-        request_id=request_id, creator_user_id=creator_id
+        request_id=request_id,
+        creator_user_id=creator_id,
+        uni_id=BOT_CONFIG["university_id"],
     )
 
     if partner_id and request_details:
@@ -852,7 +863,11 @@ async def handle_unmatch_request(
 
     request_details = get_request_details(request_id=request_id)
 
-    creator_id = unmatch_request(request_id=request_id, partner_user_id=partner_id)
+    creator_id = unmatch_request(
+        request_id=request_id,
+        partner_user_id=partner_id,
+        uni_id=BOT_CONFIG["university_id"],
+    )
 
     if creator_id and request_details:
         logger.info(f"SUCCESS: User {partner_id} unmatched from request {request_id}.")
@@ -954,7 +969,7 @@ async def notify_users_about_pairing(
 
 async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
     logger.info("JOB: sending icebreakers...")
-    meetings = get_meetings_for_icebreaker()
+    meetings = get_meetings_for_icebreaker(uni_id=BOT_CONFIG["university_id"])
 
     if not meetings:
         return
@@ -986,7 +1001,7 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
 
 async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
     logger.info("JOB: sending reminders...")
-    meetings = get_meetings_for_reminder()
+    meetings = get_meetings_for_reminder(uni_id=BOT_CONFIG["university_id"])
 
     for meeting in meetings:
         creator_id = meeting["creator_user_id"]
@@ -1030,7 +1045,7 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
 
 async def expire_requests(context: ContextTypes.DEFAULT_TYPE):
     logger.info("JOB: checking for expired requests...")
-    exp_requests = expire_pending_requests()
+    exp_requests = expire_pending_requests(uni_id=BOT_CONFIG["university_id"])
 
     if not exp_requests:
         logger.info("No requests to expire")
@@ -1060,7 +1075,9 @@ async def expire_requests(context: ContextTypes.DEFAULT_TYPE):
 
 async def request_feedback(context: ContextTypes.DEFAULT_TYPE):
     logger.info("JOB: checking for meetings to request feedback on...")
-    meetings_for_feedback = get_meetings_for_feedback()
+    meetings_for_feedback = get_meetings_for_feedback(
+        uni_id=BOT_CONFIG["university_id"]
+    )
 
     for meeting in meetings_for_feedback:
         request_id = meeting["request_id"]
@@ -1239,7 +1256,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    admin_id = int(os.getenv("ADMIN_ID", "0"))
+    admin_id = BOT_CONFIG.get("admin_id", 0)
     if update.effective_user.id != admin_id:
         return
 
@@ -1253,7 +1270,7 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    users = get_all_active_users()
+    users = get_all_active_users(uni_id=BOT_CONFIG["university_id"])
     if not users:
         await update.message.reply_text("Нет активных пользователей для рассылки.")
         return
@@ -1314,7 +1331,7 @@ async def process_feedback_text(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def send_confirmations_job(context: ContextTypes.DEFAULT_TYPE):
     logger.info("JOB: sending confirmation requests...")
-    meetings = get_meetings_to_confirm()
+    meetings = get_meetings_to_confirm(uni_id=BOT_CONFIG["university_id"])
 
     if not meetings:
         return
@@ -1462,7 +1479,7 @@ async def handle_confirmation_button(
 
 async def auto_cancel_job(context: ContextTypes.DEFAULT_TYPE):
     logger.info("JOB: cleanup unconfirmed meetings...")
-    cancelled = cancel_unconfirmed_matches()
+    cancelled = cancel_unconfirmed_matches(uni_id=BOT_CONFIG["university_id"])
 
     if not cancelled:
         return
@@ -1527,8 +1544,27 @@ async def auto_cancel_job(context: ContextTypes.DEFAULT_TYPE):
             )
 
 
+def load_config(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def main():
-    app = Application.builder().token(TOKEN).post_init(post_init).build()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", help="Path to configuration file", required=True)
+    args = parser.parse_args()
+
+    global BOT_CONFIG
+    BOT_CONFIG = load_config(args.config)
+
+    token_env_key = BOT_CONFIG.get("TELEGRAM_BOT_TOKEN")
+    token = os.getenv(token_env_key)
+
+    if not token:
+        logger.error(f"Token not found in env variable: {token_env_key}")
+        return
+
+    app = Application.builder().token(token).post_init(post_init).build()
 
     MENU_REGEX = "^(☕️ Найти компанию|📂 Мои заявки|ℹ️ Гайд|🔥 Мой Coffee Streak)$"
 

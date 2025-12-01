@@ -1261,7 +1261,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-   admin_env_key = BOT_CONFIG.get("admin_id_env")
+    admin_env_key = BOT_CONFIG.get("admin_id_env")
     if not admin_env_key:
         logger.warning("Config is missing 'admin_id_env'")
         return

@@ -38,7 +38,6 @@ from db import (
     get_user_requests,
     cancel_request,
     get_meetings_for_reminder,
-    mark_reminder_as_sent,
     expire_pending_requests,
     unmatch_request,
     cancel_request_by_creator,
@@ -1476,6 +1475,11 @@ async def handle_confirmation_button(
         request_id = int(request_id_str)
     except (ValueError, IndexError):
         await query.edit_message_text("Ошибка обработки кнопки.")
+        return
+
+    details = get_request_details(request_id)
+    if not details:
+        await query.edit_message_text("❌ Эта встреча больше не активна.")
         return
 
     user_id = update.effective_user.id

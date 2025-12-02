@@ -1479,7 +1479,9 @@ async def handle_confirmation_button(
         return
 
     user_id = update.effective_user.id
-    both_confirmed = confirm_meeting_participation(request_id, user_id)
+    both_confirmed = confirm_meeting_participation(
+        request_id, user_id, uni_id=BOT_CONFIG["university_id"]
+    )
 
     if both_confirmed:
         details = get_request_details(request_id)

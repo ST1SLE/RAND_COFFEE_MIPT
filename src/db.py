@@ -96,7 +96,7 @@ def add_coffee_shop(
 
 
 def get_active_coffee_shops(uni_id: int) -> list:
-    sql = "SELECT shop_id, name FROM coffee_shops WHERE is_active = TRUE AND university_id = %s ORDER BY name;"
+    sql = "SELECT shop_id, name, promo_label FROM coffee_shops WHERE is_active = TRUE AND university_id = %s ORDER BY name;"
 
     try:
         with get_db_connection() as conn:
@@ -568,8 +568,12 @@ def get_meetings_for_icebreaker(uni_id: int) -> list:
     RETURNING
         request_id,
         creator_user_id,
+        (SELECT username FROM users WHERE user_id = creator_user_id) as creator_username,
         partner_user_id,
-        (SELECT name FROM coffee_shops WHERE shop_id = coffee_requests.shop_id) AS shop_name;
+        (SELECT username FROM users WHERE user_id = partner_user_id) as partner_username,
+        (SELECT name FROM coffee_shops WHERE shop_id = coffee_requests.shop_id) AS shop_name,
+        (SELECT partner_chat_id FROM coffee_shops WHERE shop_id = coffee_requests.shop_id) AS partner_chat_id,
+        meet_time;
     """
 
     meetings = []
@@ -583,6 +587,17 @@ def get_meetings_for_icebreaker(uni_id: int) -> list:
         print(f"ERROR in get_meetings_for_icebreaker(): {e}")
 
     return meetings
+
+
+def save_verification_code(request_id: int, code: str):
+    sql = "UPDATE coffee_requests SET verification_code = %s WHERE request_id = %s;"
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (code, request_id))
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in save_verification_code: {e}")
 
 
 def get_meetings_for_reminder(uni_id: int) -> list:

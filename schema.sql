@@ -43,7 +43,9 @@ CREATE TABLE coffee_shops (
     description TEXT,
     working_hours JSONB,
     is_active BOOLEAN DEFAULT true,
-    university_id INTEGER REFERENCES universities(id)
+    university_id INTEGER REFERENCES universities(id),
+    promo_label VARCHAR(50) DEFAULT NULL,
+    partner_chat_id BIGINT DEFAULT NULL
 );
 
 CREATE TABLE universities (
@@ -81,7 +83,8 @@ CREATE TABLE coffee_requests (
     is_confirmed_by_creator BOOLEAN DEFAULT FALSE,
     is_confirmed_by_partner BOOLEAN DEFAULT FALSE,
     is_confirmation_sent BOOLEAN DEFAULT FALSE,
-    university_id INTEGER REFERENCES universities(id)
+    university_id INTEGER REFERENCES universities(id),
+    verification_code VARCHAR(10) DEFAULT NULL
 );
 
 CREATE TABLE cancellation_logs (

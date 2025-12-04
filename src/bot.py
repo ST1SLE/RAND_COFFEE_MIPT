@@ -58,6 +58,7 @@ from db import (
     increment_streaks,
     reset_user_streak,
     init_db_pool,
+    save_verification_code,
 )
 
 load_dotenv()
@@ -362,7 +363,12 @@ async def create_request_step1_shop(
         )
         return ConversationHandler.END
 
-    buttons = [(f"📍 {name}", f"shop_{shop_id}") for shop_id, name in shops]
+    buttons = []
+    for shop_id, name, promo_label in shops:
+        label = f"📍 {name}"
+        if promo_label:
+            label += f" {promo_label}"
+        buttons.append((label, f"shop_{shop_id}"))
     buttons.append(("⬅️ Назад в главное меню", "main_menu"))
 
     reply_markup = build_inline_keyboard(buttons_data=buttons)
@@ -979,6 +985,7 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
         creator_id = meeting["creator_user_id"]
         partner_id = meeting["partner_user_id"]
         request_id = meeting["request_id"]
+        partner_chat_id = meeting["partner_chat_id"]
 
         question = random.choice(ICEBREAKER_QUESTIONS)
 
@@ -987,6 +994,40 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
             f"Встреча уже совсем скоро! Если не знаете, с чего начать разговор, попробуйте обсудить это:\n\n"
             f"«_{question}_»"
         )
+
+        if partner_chat_id:
+            code = str(random.randint(100000, 999999))
+            save_verification_code(request_id, code)
+
+            promo_text = (
+                f"\n\n🎁 *Бонус от заведения:*\n"
+                f"Ваш код скидки 15%: `{code}`\n"
+                f"Назовите его на кассе."
+            )
+            text_for_users += promo_text
+
+            meet_time = (
+                meeting["meet_time"].astimezone(MOSCOW_TIMEZONE).strftime("%H:%M")
+            )
+            creator_name = meeting["creator_username"] or "Студент 1"
+            partner_name = meeting["partner_username"] or "Студент 2"
+
+            barista_msg = (
+                f"🆕 *Новая встреча Random Coffee*\n"
+                f"⏰ Время: {meet_time}\n"
+                f"🔑 Код: `{code}`\n"
+                f"👥 Гости: @{creator_name} и @{partner_name}\n"
+                f"💰 Скидка: 15%"
+            )
+            try:
+                await context.bot.send_message(
+                    chat_id=partner_chat_id, text=barista_msg, parse_mode="Markdown"
+                )
+                logger.info(f"Sent code {code} to partner {partner_chat_id}")
+            except Exception as e:
+                logger.error(
+                    f"Failed to send code to partner chat {partner_chat_id}: {e}"
+                )
 
         try:
             await context.bot.send_message(

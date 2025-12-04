@@ -364,13 +364,17 @@ async def create_request_step1_shop(
         return ConversationHandler.END
 
     buttons = []
-    for shop_id, name, promo_label in shops:
+    for row in shops:
+        shop_id = row[0]
+        name = row[1]
+        promo_label = row[2] if len(row) > 2 else None
+
         label = f"📍 {name}"
         if promo_label:
             label += f" {promo_label}"
         buttons.append((label, f"shop_{shop_id}"))
-    buttons.append(("⬅️ Назад в главное меню", "main_menu"))
 
+    buttons.append(("⬅️ Назад в главное меню", "main_menu"))
     reply_markup = build_inline_keyboard(buttons_data=buttons)
 
     await query.edit_message_text(
@@ -985,56 +989,61 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
         creator_id = meeting["creator_user_id"]
         partner_id = meeting["partner_user_id"]
         request_id = meeting["request_id"]
-        partner_chat_id = meeting["partner_chat_id"]
+        partner_chat_id = meeting.get("partner_chat_id")
 
         question = random.choice(ICEBREAKER_QUESTIONS)
 
-        text = (
+        text_base = (
             f"💡 *Тема для разогрева*\n\n"
             f"Встреча уже совсем скоро! Если не знаете, с чего начать разговор, попробуйте обсудить это:\n\n"
             f"«_{question}_»"
         )
 
+        promo_addition = ""
+
         if partner_chat_id:
-            code = str(random.randint(100000, 999999))
-            save_verification_code(request_id, code)
-
-            promo_text = (
-                f"\n\n🎁 *Бонус от заведения:*\n"
-                f"Ваш код скидки 15%: `{code}`\n"
-                f"Назовите его на кассе."
-            )
-            text_for_users += promo_text
-
-            meet_time = (
-                meeting["meet_time"].astimezone(MOSCOW_TIMEZONE).strftime("%H:%M")
-            )
-            creator_name = meeting["creator_username"] or "Студент 1"
-            partner_name = meeting["partner_username"] or "Студент 2"
-
-            barista_msg = (
-                f"🆕 *Новая встреча Random Coffee*\n"
-                f"⏰ Время: {meet_time}\n"
-                f"🔑 Код: `{code}`\n"
-                f"👥 Гости: @{creator_name} и @{partner_name}\n"
-                f"💰 Скидка: 15%"
-            )
             try:
+                code = str(random.randint(100000, 999999))
+
+                meet_time_str = (
+                    meeting["meet_time"].astimezone(MOSCOW_TIMEZONE).strftime("%H:%M")
+                )
+                c_user = meeting.get("creator_username") or "Без юзернейма"
+                p_user = meeting.get("partner_username") or "Без юзернейма"
+
+                barista_msg = (
+                    f"🆕 *Новая встреча Random Coffee Meet MIPT*\n"
+                    f"⏰ Время: {meet_time_str}\n"
+                    f"🔑 Код: `{code}`\n"
+                    f"👥 Гости: @{c_user} и @{p_user}\n"
+                    f"💵 Скидка: 15%"
+                )
+
                 await context.bot.send_message(
                     chat_id=partner_chat_id, text=barista_msg, parse_mode="Markdown"
                 )
-                logger.info(f"Sent code {code} to partner {partner_chat_id}")
+
+                save_verification_code(request_id, code)
+                promo_addition = (
+                    f"\n\n🎁 *Бонус от заведения:*\n"
+                    f"Ваш код скидки 15%: `{code}`\n"
+                    f"Просто покажите это сообщение бариста."
+                )
+                logger.info(f"Sent promo code {code} to shop {partner_chat_id}")
+
             except Exception as e:
                 logger.error(
-                    f"Failed to send code to partner chat {partner_chat_id}: {e}"
+                    f"Failed to send code to partner {partner_chat_id}. Promo hidden from users. Error: {e}"
                 )
+                promo_addition = ""
 
+        final_text = text_base + promo_addition
         try:
             await context.bot.send_message(
-                chat_id=creator_id, text=text, parse_mode="Markdown"
+                chat_id=creator_id, text=final_text, parse_mode="Markdown"
             )
             await context.bot.send_message(
-                chat_id=partner_id, text=text, parse_mode="Markdown"
+                chat_id=partner_id, text=final_text, parse_mode="Markdown"
             )
             logger.info(f"Successfully sent icebreaker for request_id: {request_id}")
         except Exception as e:

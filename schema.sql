@@ -39,13 +39,14 @@ CREATE TABLE users (
 -- Таблица кофеен
 CREATE TABLE coffee_shops (
     shop_id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
     description TEXT,
     working_hours JSONB,
     is_active BOOLEAN DEFAULT true,
     university_id INTEGER REFERENCES universities(id),
     promo_label VARCHAR(50) DEFAULT NULL,
-    partner_chat_id BIGINT DEFAULT NULL
+    partner_chat_id BIGINT[] DEFAULT NULL,
+    UNIQUE (name, university_id)
 );
 
 CREATE TABLE universities (

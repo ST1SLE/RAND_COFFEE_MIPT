@@ -989,7 +989,6 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
         creator_id = meeting["creator_user_id"]
         partner_id = meeting["partner_user_id"]
         request_id = meeting["request_id"]
-        partner_chat_id = meeting.get("partner_chat_id")
 
         question = random.choice(ICEBREAKER_QUESTIONS)
 
@@ -999,9 +998,16 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
             f"«_{question}_»"
         )
 
+        partner_chat_ids = meeting.get("partner_chat_id")
+
+        if partner_chat_ids is None:
+            partner_chat_ids = []
+        elif isinstance(partner_chat_ids, int):
+            partner_chat_ids = [partner_chat_ids]
+
         promo_addition = ""
 
-        if partner_chat_id:
+        if partner_chat_ids:
             try:
                 code = str(random.randint(100000, 999999))
 
@@ -1012,29 +1018,37 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
                 p_user = meeting.get("partner_username") or "Без юзернейма"
 
                 barista_msg = (
-                    f"🆕 *Новая встреча Random Coffee Meet MIPT*\n"
+                    f"🆕 *Новая встреча Random Coffee*\n"
                     f"⏰ Время: {meet_time_str}\n"
                     f"🔑 Код: `{code}`\n"
                     f"👥 Гости: @{c_user} и @{p_user}\n"
                     f"💵 Скидка: 15%"
                 )
 
-                await context.bot.send_message(
-                    chat_id=partner_chat_id, text=barista_msg, parse_mode="Markdown"
-                )
+                messages_sent = 0
+                for admin_id in partner_chat_ids:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=admin_id, text=barista_msg, parse_mode="Markdown"
+                        )
+                        messages_sent += 1
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to send code to specific admin {admin_id}: {e}"
+                        )
 
                 save_verification_code(request_id, code)
                 promo_addition = (
                     f"\n\n🎁 *Бонус от заведения:*\n"
                     f"Ваш код скидки 15%: `{code}`\n"
-                    f"Просто покажите это сообщение бариста."
+                    f"Назовите его на кассе."
                 )
-                logger.info(f"Sent promo code {code} to shop {partner_chat_id}")
+                logger.info(
+                    f"Generated promo code {code} for shop. Sent to {messages_sent} admins."
+                )
 
             except Exception as e:
-                logger.error(
-                    f"Failed to send code to partner {partner_chat_id}. Promo hidden from users. Error: {e}"
-                )
+                logger.error(f"CRITICAL promo error: {e}")
                 promo_addition = ""
 
         final_text = text_base + promo_addition

@@ -574,15 +574,19 @@ async def view_available_requests(
         return CHOOSING_ACTION
 
     buttons = []
-    for request_id, shop_name, meet_time, streak in requests:
+    for request_id, shop_name, promo_label, meet_time, streak in requests:
         meet_time_moscow = meet_time.astimezone(MOSCOW_TIMEZONE)
-
         date_time_str = meet_time_moscow.strftime("%d.%m %H:%M")
 
+        shop_display = shop_name
+        if promo_label:
+            shop_display += f" {promo_label}"
+
         if streak >= 1:
-            button_text = f"🔥{streak} | 📍{shop_name} • {date_time_str}"
+            button_text = f"🔥{streak} | 📍{shop_display} • {date_time_str}"
         else:
-            button_text = f"📍{shop_name} • {date_time_str}"
+            button_text = f"📍{shop_display} • {date_time_str}"
+
         buttons.append((button_text, f"accept_{request_id}"))
 
     reply_markup = build_inline_keyboard(buttons_data=buttons)

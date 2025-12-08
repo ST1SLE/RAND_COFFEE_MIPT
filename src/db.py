@@ -181,6 +181,7 @@ def get_pending_requests(user_id: int, uni_id: int) -> list:
     SELECT
         r.request_id,
         s.name,
+        s.promo_label,
         r.meet_time,
         u.coffee_streak
     FROM

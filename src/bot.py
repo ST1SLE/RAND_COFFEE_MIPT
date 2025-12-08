@@ -1021,7 +1021,6 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
                     f"🆕 *Новая встреча Random Coffee*\n"
                     f"⏰ Время: {meet_time_str}\n"
                     f"🔑 Код: `{code}`\n"
-                    f"👥 Гости: @{c_user} и @{p_user}\n"
                     f"💵 Скидка: 15%"
                 )
 

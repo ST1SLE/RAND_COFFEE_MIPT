@@ -1013,6 +1013,16 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
 
         if partner_chat_ids:
             try:
+                discount_val = meeting.get("discount_amount")
+
+                if not discount_val:
+                    logger.warning(
+                        f"Shop {meeting['shop_name']} has partner_id but no discount_amount!"
+                    )
+                    discount_str = "?"
+                else:
+                    discount_str = str(discount_val)
+
                 code = str(random.randint(100000, 999999))
 
                 meet_time_str = (
@@ -1025,7 +1035,7 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
                     f"🆕 *Новая встреча Random Coffee*\n"
                     f"⏰ Время: {meet_time_str}\n"
                     f"🔑 Код: `{code}`\n"
-                    f"💵 Скидка: 15%"
+                    f"💵 Скидка: {discount_str}%"
                 )
 
                 messages_sent = 0
@@ -1041,11 +1051,13 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
                         )
 
                 save_verification_code(request_id, code)
+
                 promo_addition = (
                     f"\n\n🎁 *Бонус от заведения:*\n"
-                    f"Ваш код скидки 15%: `{code}`\n"
+                    f"Ваш код скидки {discount_str}%: `{code}`\n"
                     f"Назовите его на кассе."
                 )
+
                 logger.info(
                     f"Generated promo code {code} for shop. Sent to {messages_sent} admins."
                 )

@@ -46,7 +46,8 @@ CREATE TABLE coffee_shops (
     university_id INTEGER REFERENCES universities(id),
     promo_label VARCHAR(50) DEFAULT NULL,
     partner_chat_id BIGINT[] DEFAULT NULL,
-    UNIQUE (name, university_id)
+    UNIQUE (name, university_id),
+    discount_amount INTEGER DEFAULT NULL
 );
 
 CREATE TABLE universities (

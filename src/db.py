@@ -574,6 +574,7 @@ def get_meetings_for_icebreaker(uni_id: int) -> list:
         (SELECT username FROM users WHERE user_id = partner_user_id) as partner_username,
         (SELECT name FROM coffee_shops WHERE shop_id = coffee_requests.shop_id) AS shop_name,
         (SELECT partner_chat_id FROM coffee_shops WHERE shop_id = coffee_requests.shop_id) AS partner_chat_id,
+        (SELECT discount_amount FROM coffee_shops WHERE shop_id = coffee_requests.shop_id) AS discount_amount,
         meet_time;
     """
 

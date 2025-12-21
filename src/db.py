@@ -850,7 +850,11 @@ def mark_feedback_as_requested(request_id: int, uni_id: int) -> bool:
 
 
 def save_feedback_text(request_id: int, text: str, uni_id: int):
-    sql = "UPDATE coffee_requests SET feedback_text = %s WHERE request_id = %s AND university_id = %s;"
+    sql = """
+    UPDATE coffee_requests 
+    SET feedback_text = COALESCE(feedback_text || '\n---\n', '') || %s 
+    WHERE request_id = %s AND university_id = %s;
+    """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:

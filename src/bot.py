@@ -422,21 +422,21 @@ async def create_request_step3_time(
 
     try:
         now_moscow = datetime.now(MOSCOW_TIMEZONE)
+        now_date = now_moscow.date()
         day, month = map(int, user_date_str.split("."))
+        year = now_moscow.year
+        proposed_date_naive = datetime(year, month, day)
 
-        proposed_date_naive = datetime(now_moscow.year, month, day)
+        if proposed_date_naive.date() < now_date:
+            year += 1
+            proposed_date_naive = datetime(year, month, day)
 
-        if proposed_date_naive.date() < now_moscow.date():
-            await update.message.reply_text(
-                "Эта дата уже в прошлом 🤓! Пожалуйста, выбери сегодня или дату из будущего."
-            )
-            return CHOOSING_DATE
-
-        if (proposed_date_naive.date() - now_moscow.date()).days > 14:
+        if (proposed_date_naive.date() - now_date).days > 14:
             await update.message.reply_text(
                 "Давай не будем планировать так далеко 🤓! Выбери дату в пределах следующих 14 дней."
             )
             return CHOOSING_DATE
+
     except ValueError:
         await update.message.reply_text(
             "Такой даты не существует (например, *31.02*). Пожалуйста, введи корректную дату."

@@ -1,10 +1,37 @@
-.venv/
-__pycache__/
-.env
-*.pyc
 .vscode/
 sensitive_data/
 data_analytics_plan.md
 /plan.md
 da.ipynb
 config/
+# Байтовые файлы Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Виртуальные окружения
+.venv
+venv/
+ENV/
+
+# Файлы с секретами и переменными окружения
+# ВАЖНО: Храните .env.template или .env.example с ПРИМЕРАМИ переменных
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Специфичные для проекта файлы, которые не должны быть в репозитории
+sensitive_data/
+*.ipynb
+coffee_bot_backup.dump
+
+# Данные, генерируемые Docker Compose
+# (Имя тома из docker-compose.yml)
+postgres_data/
+
+# Специфичные файлы IDE/редакторов
+.vscode/
+.idea/
+*.swp

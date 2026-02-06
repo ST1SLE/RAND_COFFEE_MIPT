@@ -1,25 +1,18 @@
 import os
-import subprocess
 import json
-from dotenv import load_dotenv
-from src.db import add_coffee_shop
+import logging
 
-# example coffee_shop data
-# {
-#     "shop_id": 1,
-#     "name": "somename",
-#     "description": "some_description",
-#     "working_hours": {"Пн-Пт": "08:00-22:00", "Cб-Вс": "10:00-21:00"},
-# }
+# Используем абсолютный импорт, так как в Docker PYTHONPATH=/app
+from src.db import add_coffee_shop, init_db_pool
 
-# working_hours could be like this:
-# {"Ежедневно": "08:00-23:00"}
+# Настройка логирования для скрипта
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def expand_schedule(short_schedule):
     """
     Converts a compact schedule into a full, readable 7-day format.
-    Example: {"Пн-Пт": "09-18", "Сб": "10-17"} -> {"Понедельник": "09-18", ...}
     """
     full_schedule = {}
     days_of_week = [
@@ -157,19 +150,27 @@ COFFEE_SHOPS_SOURCE_DATA = [
 
 
 def populate_coffee_shops_table():
-    print("Starting to add/update coffee shops...")
-    for shop_data in COFFEE_SHOPS_SOURCE_DATA:
+    # Инициализируем пул подключений, т.к. скрипт запускается отдельно от бота
+    init_db_pool()
 
+    # ID университета МФТИ (согласно schema.sql)
+    MIPT_ID = 1
+
+    logger.info("Starting to add/update coffee shops for Uni ID: %s...", MIPT_ID)
+
+    for shop_data in COFFEE_SHOPS_SOURCE_DATA:
         full_working_hours = expand_schedule(shop_data["schedule"])
         working_hours_json = json.dumps(full_working_hours, ensure_ascii=False)
 
+        # Передаем uni_id (Обязательно для v2.0)
         add_coffee_shop(
             shop_id=shop_data["id"],
             name=shop_data["name"],
             description=shop_data["desc"],
             working_hours=working_hours_json,
+            uni_id=MIPT_ID,
         )
-    print("\nPopulation complete!")
+    logger.info("Population complete!")
 
 
 if __name__ == "__main__":

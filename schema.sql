@@ -21,6 +21,14 @@ CREATE TYPE cancellation_event_enum AS ENUM (
     'admin_ban_cancel' 
 );
 
+CREATE TABLE universities (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(50) UNIQUE NOT NULL, -- 'mipt', 'hse', 'msu' и т.д.
+    name VARCHAR(255) NOT NULL,
+    timezone VARCHAR(50) DEFAULT 'Europe/Moscow',
+    is_active BOOLEAN DEFAULT TRUE
+);
+
 -- Таблица пользователей
 CREATE TABLE users (
     user_id BIGINT PRIMARY KEY,
@@ -50,13 +58,6 @@ CREATE TABLE coffee_shops (
     discount_amount INTEGER DEFAULT NULL
 );
 
-CREATE TABLE universities (
-    id SERIAL PRIMARY KEY,
-    slug VARCHAR(50) UNIQUE NOT NULL, -- 'mipt', 'hse', 'msu' и т.д.
-    name VARCHAR(255) NOT NULL,
-    timezone VARCHAR(50) DEFAULT 'Europe/Moscow',
-    is_active BOOLEAN DEFAULT TRUE
-);
 
 INSERT INTO universities (slug, name) VALUES 
     ('mipt', 'МФТИ'),

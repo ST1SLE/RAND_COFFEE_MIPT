@@ -145,6 +145,7 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    # Получаем ID вуза из глобального конфига
     uni_id = BOT_CONFIG["university_id"]
 
     if not is_user_active(user.id, uni_id=uni_id):
@@ -162,10 +163,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id=user.id,
         first_name=user.first_name,
         username=user.username,
-        uni_id=BOT_CONFIG["university_id"],
+        # Передаем ID вуза
+        uni_id=uni_id,
     )
 
-    user_details = get_user_details(user.id)
+    # Передаем ID вуза
+    user_details = get_user_details(user.id, uni_id=uni_id)
     if user_details and user_details.get("phystech_school"):
         welcome_text = (
             "Привет! 👋 Я бот для случайных кофе-митов.\n\n"
@@ -188,6 +191,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def register_school(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     school = update.message.text
+    uni_id = BOT_CONFIG["university_id"]  # Получаем ID вуза
 
     schools_list = BOT_CONFIG["schools"]
     flat_schools = [item for sublist in schools_list for item in sublist]
@@ -199,7 +203,8 @@ async def register_school(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if school == "Никакой из них":
         user_id = update.effective_user.id
-        update_user_profile(user_id, school="External", year=None)
+        # Передаем ID вуза
+        update_user_profile(user_id, school="External", year=None, uni_id=uni_id)
 
         await show_main_menu_keyboard(
             update,
@@ -220,6 +225,7 @@ async def register_school(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def register_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     year_str = update.message.text
+    uni_id = BOT_CONFIG["university_id"]  # Получаем ID вуза
 
     if year_str == "Вернуться назад":
         schools_list = BOT_CONFIG["schools"]
@@ -239,7 +245,8 @@ async def register_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     year = int(year_str)
     user_id = update.effective_user.id
 
-    update_user_profile(user_id, school=school, year=year)
+    # Передаем ID вуза
+    update_user_profile(user_id, school=school, year=year, uni_id=uni_id)
 
     await show_main_menu_keyboard(
         update, context, text="Профиль заполнен! 🎉\nТеперь ты готов к кофе-митам."
@@ -608,7 +615,9 @@ def escape_markdown(text: str) -> str:
 
 async def show_my_streak(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_details = get_user_details(user_id)
+    uni_id = BOT_CONFIG["university_id"]  # Получаем ID вуза
+    # Передаем ID вуза
+    user_details = get_user_details(user_id, uni_id=uni_id)
 
     if not user_details:
         await update.message.reply_text("Произошла ошибка при получении данных.")

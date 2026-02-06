@@ -274,7 +274,7 @@ def get_request_details(request_id: int) -> dict:
         return {}
 
 
-def get_user_details(user_id: int) -> dict:
+def get_user_details(user_id: int, uni_id: int) -> dict:
     sql = """
     SELECT
         username,
@@ -285,13 +285,13 @@ def get_user_details(user_id: int) -> dict:
     FROM
         users
     WHERE
-        user_id = %s;
+        user_id = %s AND university_id = %s;
     """
 
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (user_id,))
+                cur.execute(sql, (user_id, uni_id))  # Добавили uni_id
                 result = cur.fetchone()
                 if result:
                     return {
@@ -303,22 +303,23 @@ def get_user_details(user_id: int) -> dict:
                     }
     except Exception as e:
         print(f"ERROR in get_user_details(): {e}")
-        return {}
+    # Возвращаем пустой dict, если ничего не найдено
+    return {}
 
 
-def update_user_profile(user_id: int, school: str, year: int | None):
+def update_user_profile(user_id: int, school: str, year: int | None, uni_id: int):
     sql = """
     UPDATE users
     SET
         phystech_school = %s,
         year_as_student = %s
     WHERE
-        user_id = %s;
+        user_id = %s AND university_id = %s;
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (school, year, user_id))
+                cur.execute(sql, (school, year, user_id, uni_id))  # Добавили uni_id
                 conn.commit()
     except Exception as e:
         print(f"ERROR in update_user_profile(): {e}")

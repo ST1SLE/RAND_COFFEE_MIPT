@@ -1,23 +1,20 @@
 version: "3.8"
 
 services:
-  # Сервис Базы Данных
   db:
-    image: ankane/pgvector:v0.5.1 # Postgres 15 + pgvector pre-installed
+    image: ankane/pgvector:v0.5.1
     restart: always
     environment:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASS}
     ports:
-      - "5433:5432" # Прокидываем на порт 5433 локально, чтобы не конфликтовать с твоим локальным Postgres (если он есть)
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Автоматически накатываем schema.sql и миграции при ПЕРВОМ запуске пустой базы
       - ./schema.sql:/docker-entrypoint-initdb.d/1_schema.sql
       - ./migrations/001_enable_vector.sql:/docker-entrypoint-initdb.d/2_vector_migration.sql
 
-  # Сервис Бота
   bot:
     build: .
     restart: always
@@ -26,21 +23,27 @@ services:
     env_file:
       - .env
     environment:
-      # ПЕРЕОПРЕДЕЛЯЕМ хост БД. Внутри докера база доступна по имени сервиса "db"
       - DB_HOST=db
-      # Остальные переменные (USER, PASS) возьмутся из .env файла автоматически
     command: python src/bot.py --config config/mipt.json
 
-  # Сервис ML Worker (Пока заглушка, раскомментируем на этапе 3)
-  # worker:
-  #   build: .
-  #   depends_on:
-  #     - db
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     - DB_HOST=db
-  #   command: python src/worker.py
+  # НОВЫЙ СЕРВИС: Запускает скрипт один раз и выходит
+  seeder:
+    build: .
+    depends_on:
+      - db # Запустится только после старта БД
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+    command: >
+      bash -c "
+        echo 'Waiting for DB to be ready...';
+        sleep 10; # Даем Postgres время на инициализацию
+        echo 'Running seeder script...';
+        python add_coffee_shops.py;
+        echo 'Seeder finished.';
+      "
+    # 'restart: no' не нужен, т.к. сервис сам завершится после выполнения команды
 
 volumes:
   postgres_data:

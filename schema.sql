@@ -86,6 +86,7 @@ CREATE TABLE coffee_requests (
     is_confirmed_by_creator BOOLEAN DEFAULT FALSE,
     is_confirmed_by_partner BOOLEAN DEFAULT FALSE,
     is_confirmation_sent BOOLEAN DEFAULT FALSE,
+    is_match_notification_sent BOOLEAN DEFAULT FALSE,  -- Флаг для уведомлений о ML-мэтчинге
     university_id INTEGER REFERENCES universities(id),
     verification_code VARCHAR(10) DEFAULT NULL
 );

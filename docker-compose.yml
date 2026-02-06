@@ -59,6 +59,19 @@ services:
       - model_cache:/root/.cache/torch/sentence_transformers  # Кеш моделей ML (сохраняется между перезапусками)
     command: python src/worker.py --config config/mipt.json
 
+  # Matcher Service: Автоматический мэтчинг пользователей на основе косинусного сходства
+  matcher:
+    build: .
+    restart: always
+    depends_on:
+      - db
+      - worker  # Зависит от worker, так как нужны embeddings
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+    command: python src/matcher_service.py --config config/mipt.json
+
 volumes:
   postgres_data:
   model_cache:  # Хранит загруженные ML модели между перезапусками

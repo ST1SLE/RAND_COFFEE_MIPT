@@ -1008,6 +1008,111 @@ def update_user_embedding(user_id: int, embedding: list, uni_id: int):
         return False
 
 
+def get_pending_requests_for_matching(uni_id: int):
+    """
+    Получает pending заявки с эмбеддингами создателей для автоматического мэтчинга.
+
+    Условия:
+    - status = 'pending'
+    - partner_user_id IS NULL (нет партнера)
+    - meet_time > NOW() (встреча в будущем)
+    - creator имеет embedding (не NULL)
+    - Фильтрация по university_id (SaaS-compliance)
+
+    Returns:
+        list: [(request_id, creator_user_id, embedding, meet_time, shop_id), ...]
+    """
+    sql = """
+        SELECT
+            r.request_id,
+            r.creator_user_id,
+            u.embedding,
+            r.meet_time,
+            r.shop_id
+        FROM coffee_requests r
+        JOIN users u ON r.creator_user_id = u.user_id
+        WHERE r.status = 'pending'
+          AND r.partner_user_id IS NULL
+          AND r.meet_time > NOW()
+          AND r.university_id = %s
+          AND u.embedding IS NOT NULL
+        ORDER BY r.meet_time ASC;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (uni_id,))
+                return cur.fetchall()
+    except Exception as e:
+        print(f"ERROR in get_pending_requests_for_matching: {e}")
+        return []
+
+
+def get_user_meeting_history(user_id: int, uni_id: int):
+    """
+    Получает список user_id, с которыми пользователь уже встречался.
+    Это нужно для исключения повторных встреч при мэтчинге.
+
+    Returns:
+        set: Множество user_id партнеров из прошлых встреч
+    """
+    sql = """
+        SELECT DISTINCT
+            CASE
+                WHEN creator_user_id = %s THEN partner_user_id
+                ELSE creator_user_id
+            END as partner_id
+        FROM coffee_requests
+        WHERE (creator_user_id = %s OR partner_user_id = %s)
+          AND status = 'matched'
+          AND university_id = %s
+          AND partner_user_id IS NOT NULL;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id, user_id, user_id, uni_id))
+                results = cur.fetchall()
+                return {row[0] for row in results if row[0] is not None}
+    except Exception as e:
+        print(f"ERROR in get_user_meeting_history: {e}")
+        return set()
+
+
+def get_new_matches_for_notification(uni_id: int):
+    """
+    Получает matched заявки, для которых еще не было отправлено уведомление.
+    Используется ботом для информирования пользователей о новых матчах от ML matcher.
+
+    Returns:
+        list: [(request_id, creator_user_id, partner_user_id, meet_time), ...]
+    """
+    sql = """
+        UPDATE coffee_requests
+        SET is_match_notification_sent = TRUE
+        WHERE request_id IN (
+            SELECT request_id
+            FROM coffee_requests
+            WHERE status = 'matched'
+              AND is_match_notification_sent = FALSE
+              AND partner_user_id IS NOT NULL
+              AND university_id = %s
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING request_id, creator_user_id, partner_user_id, meet_time;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(sql, (uni_id,))
+                matches = cur.fetchall()
+                conn.commit()
+                return matches
+    except Exception as e:
+        print(f"ERROR in get_new_matches_for_notification: {e}")
+        return []
+
+
 def main():
     pass
 

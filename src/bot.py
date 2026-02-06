@@ -60,6 +60,7 @@ from db import (
     reset_user_streak,
     init_db_pool,
     save_verification_code,
+    get_new_matches_for_notification,  # ML matcher уведомления
 )
 
 load_dotenv()
@@ -366,6 +367,7 @@ async def post_init(app):
         ]
     )
 
+    app.job_queue.run_repeating(notify_new_matches_job, interval=120, first=25)  # Новый джоб для ML матчей
     app.job_queue.run_repeating(send_confirmations_job, interval=300, first=30)
     app.job_queue.run_repeating(send_icebreakers, interval=60, first=20)
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
@@ -1579,6 +1581,73 @@ async def send_confirmations_job(context: ContextTypes.DEFAULT_TYPE):
             logger.error(
                 f"Failed to send confirmation for request_id {request_id}: {e}"
             )
+
+
+async def notify_new_matches_job(context: ContextTypes.DEFAULT_TYPE):
+    """
+    Джоб для уведомления пользователей о новых автоматических матчах от ML matcher.
+    Запускается каждые 120 секунд.
+    """
+    logger.info("JOB: checking for new ML matches to notify...")
+
+    matches = get_new_matches_for_notification(uni_id=BOT_CONFIG["university_id"])
+
+    if not matches:
+        return
+
+    logger.info(f"Found {len(matches)} new matches to notify.")
+
+    for match in matches:
+        request_id = match["request_id"]
+        creator_id = match["creator_user_id"]
+        partner_id = match["partner_user_id"]
+        meet_time = match["meet_time"]
+
+        meet_time_moscow = meet_time.astimezone(MOSCOW_TIMEZONE)
+        date_str = meet_time_moscow.strftime("%d.%m")
+        time_str = meet_time_moscow.strftime("%H:%M")
+
+        # Получаем имена пользователей
+        creator_details = get_user_details(creator_id, BOT_CONFIG["university_id"])
+        partner_details = get_user_details(partner_id, BOT_CONFIG["university_id"])
+
+        creator_name = creator_details.get("first_name", "пользователь")
+        partner_name = partner_details.get("first_name", "пользователь")
+
+        # Сообщение для создателя заявки
+        text_creator = (
+            f"🎉 *Отличные новости!*\n\n"
+            f"Мы нашли для вас пару на основе общих интересов!\n\n"
+            f"👤 Ваш партнер: *{partner_name}*\n"
+            f"📅 Дата: *{date_str}* в *{time_str}*\n\n"
+            f"Система автоматически подобрала вас, основываясь на ваших интересах. "
+            f"Скоро вы получите запрос на подтверждение встречи."
+        )
+
+        # Сообщение для партнера
+        text_partner = (
+            f"🎉 *Отличные новости!*\n\n"
+            f"Мы нашли для вас пару на основе общих интересов!\n\n"
+            f"👤 Ваш партнер: *{creator_name}*\n"
+            f"📅 Дата: *{date_str}* в *{time_str}*\n\n"
+            f"Система автоматически подобрала вас, основываясь на ваших интересах. "
+            f"Скоро вы получите запрос на подтверждение встречи."
+        )
+
+        try:
+            await context.bot.send_message(
+                chat_id=creator_id,
+                text=text_creator,
+                parse_mode="Markdown",
+            )
+            await context.bot.send_message(
+                chat_id=partner_id,
+                text=text_partner,
+                parse_mode="Markdown",
+            )
+            logger.info(f"Sent match notification for request_id: {request_id} (creator: {creator_id}, partner: {partner_id})")
+        except Exception as e:
+            logger.error(f"Failed to send match notification for request_id {request_id}: {e}")
 
 
 async def send_final_contacts(context: ContextTypes.DEFAULT_TYPE, details: dict):

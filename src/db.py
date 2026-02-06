@@ -281,7 +281,8 @@ def get_user_details(user_id: int, uni_id: int) -> dict:
         first_name,
         phystech_school,
         year_as_student,
-        coffee_streak
+        coffee_streak,
+        bio
     FROM
         users
     WHERE
@@ -291,7 +292,7 @@ def get_user_details(user_id: int, uni_id: int) -> dict:
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (user_id, uni_id))  # Добавили uni_id
+                cur.execute(sql, (user_id, uni_id))
                 result = cur.fetchone()
                 if result:
                     return {
@@ -300,29 +301,54 @@ def get_user_details(user_id: int, uni_id: int) -> dict:
                         "phystech_school": result[2],
                         "year_as_student": result[3],
                         "coffee_streak": result[4] if result[4] else 0,
+                        "bio": result[5],  # Добавили возврат bio
                     }
     except Exception as e:
         print(f"ERROR in get_user_details(): {e}")
-    # Возвращаем пустой dict, если ничего не найдено
     return {}
 
 
-def update_user_profile(user_id: int, school: str, year: int | None, uni_id: int):
+def update_user_profile(
+    user_id: int, school: str, year: int | None, bio: str | None, uni_id: int
+):
     sql = """
     UPDATE users
     SET
         phystech_school = %s,
-        year_as_student = %s
+        year_as_student = %s,
+        bio = %s,
+        embedding = NULL  -- Сбрасываем вектор, так как текст изменился
     WHERE
         user_id = %s AND university_id = %s;
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (school, year, user_id, uni_id))  # Добавили uni_id
+                cur.execute(sql, (school, year, bio, user_id, uni_id))
                 conn.commit()
     except Exception as e:
         print(f"ERROR in update_user_profile(): {e}")
+
+
+def update_user_bio(user_id: int, bio: str, uni_id: int):
+    """
+    Обновляет только поле "О себе" и сбрасывает эмбеддинг для пересчета.
+    """
+    sql = """
+    UPDATE users
+    SET
+        bio = %s,
+        embedding = NULL
+    WHERE
+        user_id = %s AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (bio, user_id, uni_id))
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in update_user_bio(): {e}")
 
 
 def get_user_requests(user_id: int, uni_id: int) -> list:
@@ -920,6 +946,66 @@ def is_user_active(user_id: int, uni_id=None) -> bool:
     except Exception as e:
         print(f"ERROR in is_user_active: {e}")
         return True
+
+
+def get_users_without_embeddings(uni_id: int, limit: int = 30):
+    """
+    Получает пользователей с bio, но без embedding для векторизации.
+    Строгая фильтрация по university_id (SaaS-compliance).
+
+    Returns:
+        list: [(user_id, bio), ...]
+    """
+    sql = """
+        SELECT user_id, bio
+        FROM users
+        WHERE university_id = %s
+          AND bio IS NOT NULL
+          AND bio != ''
+          AND embedding IS NULL
+        ORDER BY created_at DESC
+        LIMIT %s
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (uni_id, limit))
+                return cur.fetchall()
+    except Exception as e:
+        print(f"ERROR in get_users_without_embeddings: {e}")
+        return []
+
+
+def update_user_embedding(user_id: int, embedding: list, uni_id: int):
+    """
+    Сохраняет сгенерированный эмбеддинг в БД.
+    Проверка university_id для безопасности (SaaS-compliance).
+
+    Args:
+        user_id: ID пользователя
+        embedding: Вектор размерности 384 (list of floats)
+        uni_id: ID университета для проверки
+
+    Returns:
+        bool: True если успешно, False если ошибка
+    """
+    sql = """
+        UPDATE users
+        SET embedding = %s
+        WHERE user_id = %s
+          AND university_id = %s
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Преобразуем список в строку для pgvector: '[0.1, 0.2, ...]'
+                embedding_str = '[' + ','.join(map(str, embedding)) + ']'
+                cur.execute(sql, (embedding_str, user_id, uni_id))
+                conn.commit()
+                return cur.rowcount > 0
+    except Exception as e:
+        print(f"ERROR in update_user_embedding for user {user_id}: {e}")
+        return False
 
 
 def main():

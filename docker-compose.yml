@@ -45,5 +45,20 @@ services:
       "
     # 'restart: no' не нужен, т.к. сервис сам завершится после выполнения команды
 
+  # ML Worker: Генерирует эмбеддинги для пользователей
+  worker:
+    build: .
+    restart: always
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+    volumes:
+      - model_cache:/root/.cache/torch/sentence_transformers  # Кеш моделей ML (сохраняется между перезапусками)
+    command: python src/worker.py --config config/mipt.json
+
 volumes:
   postgres_data:
+  model_cache:  # Хранит загруженные ML модели между перезапусками

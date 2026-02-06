@@ -34,7 +34,7 @@ from db import (
     get_pending_requests,
     pair_user_for_request,
     get_request_details,
-    get_user_details,
+    get_user_details,  # Обновлена (принимает uni_id)
     get_user_requests,
     cancel_request,
     get_meetings_for_reminder,
@@ -45,7 +45,8 @@ from db import (
     mark_feedback_as_requested,
     get_meetings_for_feedback,
     save_meeting_outcome,
-    update_user_profile,
+    update_user_profile,  # Обновлена (принимает bio и uni_id)
+    update_user_bio,  # НОВАЯ функция
     get_meetings_for_icebreaker,
     get_all_active_users,
     save_feedback_text,
@@ -81,7 +82,10 @@ logger = logging.getLogger(__name__)
     MANAGING_REQUESTS,
     REGISTER_SCHOOL,
     REGISTER_YEAR,
-) = range(9)
+    REGISTER_BIO,
+    EDITING_PROFILE,
+    EDITING_BIO,
+) = range(12)
 
 STATUS_CONFIG = {
     "pending": {
@@ -120,9 +124,8 @@ async def show_main_menu_keyboard(
     update: Update, context: ContextTypes.DEFAULT_TYPE, text: str
 ):
     keyboard = [
-        ["☕️ Найти компанию"],
-        ["📂 Мои заявки", "🔥 Мой Coffee Streak"],
-        ["ℹ️ Гайд"],
+        ["☕️ Найти компанию", "📂 Мои заявки"],
+        ["👤 Мой профиль", "ℹ️ Гайд"],
     ]
     reply_markup = ReplyKeyboardMarkup(
         keyboard, resize_keyboard=True, one_time_keyboard=False
@@ -145,40 +148,25 @@ async def back_to_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    # Получаем ID вуза из глобального конфига
     uni_id = BOT_CONFIG["university_id"]
 
-    if not is_user_active(user.id, uni_id=uni_id):
-        await update.message.reply_text(
-            "🚫 *Ваш аккаунт заблокирован.*\n\n"
-            "К сожалению, вы слишком часто пропускали встречи без предупреждения. "
-            "Доступ к боту ограничен.",
-            parse_mode="Markdown",
-        )
-        return ConversationHandler.END
-
-    logger.info(f"User: {user.username} (ID: {user.id}) started bot.")
-
-    add_or_update_user(
+    add_or_update_user(  # Сначала обновляем/создаем запись в БД
         user_id=user.id,
         first_name=user.first_name,
         username=user.username,
-        # Передаем ID вуза
         uni_id=uni_id,
     )
 
-    # Передаем ID вуза
     user_details = get_user_details(user.id, uni_id=uni_id)
+
+    # Проверяем, зарегистрирован ли пользователь (есть ли факультет)
     if user_details and user_details.get("phystech_school"):
-        welcome_text = (
-            "Привет! 👋 Я бот для случайных кофе-митов.\n\n"
-            "Скорее жми «☕️ Найти компанию»"
-        )
+        welcome_text = "С возвращением! 👋\n\n" "Скорее жми «☕️ Найти компанию»"
         await show_main_menu_keyboard(update, context, text=welcome_text)
         return ConversationHandler.END
 
+    # Если факультета нет, запускаем полную регистрацию
     schools = BOT_CONFIG["schools"]
-
     await update.message.reply_text(
         "Привет! 👋 Перед тем как начать, давай познакомимся.\n\n"
         "С какого ты факультета?",
@@ -202,16 +190,14 @@ async def register_school(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["reg_school"] = school
 
     if school == "Никакой из них":
-        user_id = update.effective_user.id
-        # Передаем ID вуза
-        update_user_profile(user_id, school="External", year=None, uni_id=uni_id)
-
-        await show_main_menu_keyboard(
-            update,
-            context,
-            text="Добро пожаловать!\nТеперь ты можешь искать компанию.",
+        context.user_data["reg_year"] = None
+        await update.message.reply_text(
+            "Понял! Мы рады гостям и сотрудникам. 😊\n\n"
+            "Последний шаг: расскажи немного о себе. Кто ты, чем занимаешься, "
+            "о чем хочешь поговорить за чашкой кофе? Это поможет алгоритму найти тебе интересную компанию.",
+            reply_markup=ReplyKeyboardRemove(),
         )
-        return ConversationHandler.END
+        return REGISTER_BIO
 
     years_list = BOT_CONFIG["years"]
     await update.message.reply_text(
@@ -225,7 +211,7 @@ async def register_school(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def register_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     year_str = update.message.text
-    uni_id = BOT_CONFIG["university_id"]  # Получаем ID вуза
+    # uni_id здесь не нужен, так как запись в БД переносится в следующий шаг
 
     if year_str == "Вернуться назад":
         schools_list = BOT_CONFIG["schools"]
@@ -241,16 +227,118 @@ async def register_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await update.message.reply_text("Пожалуйста, выбери курс кнопкой (1-8).")
         return REGISTER_YEAR
 
+    # Сохраняем во временное хранилище
+    context.user_data["reg_year"] = int(year_str)
+
+    await update.message.reply_text(
+        "Супер! Последний шаг: расскажи немного о себе. 📝\n\n"
+        "Напиши пару предложений: чем увлекаешься, о чем любишь говорить, "
+        "какой кофе пьешь. Это поможет алгоритму подбирать тебе интересную компанию.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return REGISTER_BIO
+
+
+async def register_bio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    bio_text = update.message.text
+    uni_id = BOT_CONFIG["university_id"]
+
+    if len(bio_text) < 10:
+        await update.message.reply_text(
+            "Слишком коротко! Напиши хотя бы пару слов о себе."
+        )
+        return REGISTER_BIO
+
+    if len(bio_text) > 400:
+        await update.message.reply_text(
+            "Попробуй уложиться в 400 символов, пожалуйста."
+        )
+        return REGISTER_BIO
+
     school = context.user_data.get("reg_school")
-    year = int(year_str)
+    year = context.user_data.get("reg_year")
     user_id = update.effective_user.id
 
-    # Передаем ID вуза
-    update_user_profile(user_id, school=school, year=year, uni_id=uni_id)
+    # Сохраняем все данные
+    update_user_profile(user_id, school=school, year=year, bio=bio_text, uni_id=uni_id)
 
     await show_main_menu_keyboard(
-        update, context, text="Профиль заполнен! 🎉\nТеперь ты готов к кофе-митам."
+        update, context, text="Профиль заполнен! 🎉\nТеперь всё готово для кофе-митов."
     )
+    return ConversationHandler.END
+
+
+async def my_profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Показывает текущий профиль пользователя и кнопки для редактирования.
+    """
+    user_id = update.effective_user.id
+    uni_id = BOT_CONFIG["university_id"]
+    user_details = get_user_details(user_id, uni_id=uni_id)
+
+    if not user_details:
+        await update.message.reply_text(
+            "Не удалось загрузить твой профиль. Попробуй /start."
+        )
+        return ConversationHandler.END
+
+    school = user_details.get("phystech_school", "Не указан")
+    year = user_details.get("year_as_student", "Не указан")
+    bio = user_details.get("bio", "Не заполнено")
+    streak = user_details.get("coffee_streak", 0)
+
+    # Используем HTML теги <b> вместо Markdown звездочек
+    profile_text = (
+        f"👤 <b>Твой профиль:</b>\n\n"
+        f"🏫 <b>Факультет:</b> {html.escape(str(school))}\n"
+        f"🎓 <b>Курс:</b> {html.escape(str(year))}\n"
+        f"📝 <b>О себе:</b> {html.escape(bio)}\n\n"
+        f"🔥 <b>Coffee Streak:</b> {streak}"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("✏️ Изменить «О себе»", callback_data="edit_bio")],
+        [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        profile_text, parse_mode="HTML", reply_markup=reply_markup
+    )
+    return EDITING_PROFILE
+
+
+async def edit_bio_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Запрашивает новый текст для "О себе".
+    """
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(
+        "Хорошо, отправь мне новый текст о себе (до 400 символов)."
+    )
+    return EDITING_BIO
+
+
+async def edit_bio_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Сохраняет новый текст "О себе" и завершает диалог.
+    """
+    new_bio = update.message.text
+    user_id = update.effective_user.id
+    uni_id = BOT_CONFIG["university_id"]
+
+    if len(new_bio) < 10 or len(new_bio) > 400:
+        await update.message.reply_text(
+            "Текст должен быть от 10 до 400 символов. Попробуй еще раз."
+        )
+        return EDITING_BIO
+
+    # Используем новую функцию для обновления только bio
+    update_user_bio(user_id, new_bio, uni_id)
+
+    await update.message.reply_text("✅ Отлично, твой профиль обновлен!")
+    await show_main_menu_keyboard(update, context, "Главное меню:")
     return ConversationHandler.END
 
 
@@ -1426,7 +1514,7 @@ async def process_feedback_text(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     user_text = update.message.text
-    if user_text in ["☕️ Найти компанию", "📂 Мои заявки", "ℹ️ Гайд"]:
+    if user_text in ["☕️ Найти компанию", "📂 Мои заявки", "ℹ️ Гайд", "👤 Мой профиль"]:
         context.user_data.pop("awaiting_feedback_id", None)
         return
 
@@ -1663,6 +1751,30 @@ def load_config(path):
         return json.load(f)
 
 
+async def back_to_main_menu_from_anywhere(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """
+    Универсальный прерыватель. Завершает текущий сценарий и запускает новый
+    в зависимости от того, какая кнопка меню была нажата.
+    """
+    text = update.message.text
+
+    # Завершаем текущий ConversationHandler
+    # Библиотека сама подхватит новое сообщение следующим подходящим хендлером
+    if text == "☕️ Найти компанию":
+        return await find_company_start(update, context)
+    elif text == "📂 Мои заявки":
+        return await my_requests_start(update, context)
+    elif text == "👤 Мой профиль":
+        return await my_profile_start(update, context)
+    elif text == "ℹ️ Гайд":
+        await help_command(update, context)
+        return ConversationHandler.END
+
+    return ConversationHandler.END
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", help="Path to configuration file", required=True)
@@ -1682,39 +1794,56 @@ def main():
 
     app = Application.builder().token(token).post_init(post_init).build()
 
-    MENU_REGEX = "^(☕️ Найти компанию|📂 Мои заявки|ℹ️ Гайд|🔥 Мой Coffee Streak)$"
-
     find_handler = MessageHandler(
         filters.Regex("^☕️ Найти компанию$"), find_company_start
     )
     my_requests_handler = MessageHandler(
         filters.Regex("^📂 Мои заявки$"), my_requests_start
     )
-    my_streak_handler = MessageHandler(
-        filters.Regex("^🔥 Мой Coffee Streak$"), show_my_streak
+    my_profile_handler = MessageHandler(
+        filters.Regex("^👤 Мой профиль$"), my_profile_start
     )
 
+    # Фильтр, который ловит любую главную кнопку меню для выхода из текущего состояния
+    MENU_BUTTONS_FILTER = filters.Regex(
+        "^(☕️ Найти компанию|📂 Мои заявки|👤 Мой профиль|ℹ️ Гайд)$"
+    )
+
+    # 2. Сценарий регистрации
     registration_conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
+            # Исключаем кнопки меню из ввода, чтобы срабатывал fallback
             REGISTER_SCHOOL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, register_school)
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER,
+                    register_school,
+                )
             ],
             REGISTER_YEAR: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, register_year)
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER,
+                    register_year,
+                )
+            ],
+            REGISTER_BIO: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER, register_bio
+                )
             ],
         },
-        fallbacks=[CommandHandler("cancel", start)],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            MessageHandler(MENU_BUTTONS_FILTER, back_to_main_menu_from_anywhere),
+        ],
         allow_reentry=True,
     )
 
+    # 3. Сценарий поиска кофе и управления заявками
     conv_handler = ConversationHandler(
         entry_points=[
             find_handler,
-            CommandHandler("find", find_company_start),
             my_requests_handler,
-            CommandHandler("my_coffee_requests", my_requests_start),
-            my_streak_handler,
         ],
         states={
             CHOOSING_ACTION: [
@@ -1731,8 +1860,18 @@ def main():
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             CHOOSING_DATE: [
+                # Исключаем кнопки меню, чтобы не сохранять их как дату
                 MessageHandler(
-                    filters.TEXT & ~filters.COMMAND, create_request_step3_time
+                    filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER,
+                    create_request_step3_time,
+                ),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
+            ],
+            CHOOSING_TIME: [
+                # Исключаем кнопки меню, чтобы не сохранять их как время
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER,
+                    create_request_step4_validate,
                 ),
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
@@ -1742,12 +1881,6 @@ def main():
                 ),
                 CallbackQueryHandler(
                     create_request_step1_shop, pattern="^back_to_shop_list$"
-                ),
-                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
-            ],
-            CHOOSING_TIME: [
-                MessageHandler(
-                    filters.TEXT & ~filters.COMMAND, create_request_step4_validate
                 ),
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
@@ -1765,19 +1898,40 @@ def main():
             ],
         },
         fallbacks=[
-            find_handler,
-            my_requests_handler,
-            my_streak_handler,
             CommandHandler("cancel", cancel),
-            CommandHandler("start", start),
+            # Если нажали другую кнопку меню — закрываем этот сценарий
+            MessageHandler(MENU_BUTTONS_FILTER, back_to_main_menu_from_anywhere),
         ],
         allow_reentry=True,
-        per_message=False,
     )
 
+    # 4. Сценарий профиля
+    profile_conv = ConversationHandler(
+        entry_points=[my_profile_handler],
+        states={
+            EDITING_PROFILE: [
+                CallbackQueryHandler(edit_bio_prompt, pattern="^edit_bio$"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
+            ],
+            EDITING_BIO: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER,
+                    edit_bio_save,
+                )
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            # Если нажали «Найти компанию» или другую кнопку — закрываем профиль
+            MessageHandler(MENU_BUTTONS_FILTER, back_to_main_menu_from_anywhere),
+        ],
+        allow_reentry=True,
+    )
+
+    # Добавляем в строгом порядке
     app.add_handler(registration_conv)
+    app.add_handler(profile_conv)  # Профиль выше основного поиска
     app.add_handler(conv_handler)
-    app.add_handler(my_streak_handler)
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
@@ -1798,7 +1952,7 @@ def main():
         )
     )
 
-    feedback_filter = filters.TEXT & ~filters.COMMAND & ~filters.Regex(MENU_REGEX)
+    feedback_filter = filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER
     app.add_handler(MessageHandler(feedback_filter, process_feedback_text))
 
     logger.info(

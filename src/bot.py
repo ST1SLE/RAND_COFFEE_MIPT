@@ -650,6 +650,16 @@ async def create_request_step4_validate(
         return CHOOSING_TIME
 
 
+# ---------------------------------------------------------------------------
+# РУЧНОЙ МЭТЧИНГ (v1.0 fallback)
+#
+# Пользователь может просмотреть список pending-заявок и выбрать партнёра
+# самостоятельно.  Это запасной путь на случай, если ML-мэтчер (matcher
+# service) ещё не подобрал пару — например, при малом количестве pending
+# заявок.  Оба механизма безопасно сосуществуют: WHERE status='pending'
+# AND partner_user_id IS NULL гарантирует, что уже смэтчённые заявки
+# не появятся в списке и не будут повторно приняты.
+# ---------------------------------------------------------------------------
 async def view_available_requests(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -922,7 +932,7 @@ async def handle_cancel_request_as_creator(
     request_id = int(query.data.split("_")[2])
     creator_id = update.effective_user.id
 
-    request_details = get_request_details(request_id=request_id)
+    request_details = get_request_details(request_id=request_id, uni_id=BOT_CONFIG["university_id"])
     partner_id = cancel_request_by_creator(
         request_id=request_id,
         creator_user_id=creator_id,
@@ -975,7 +985,7 @@ async def handle_unmatch_request(
         f"User {partner_id} is attempting to unmatch from request {request_id}."
     )
 
-    request_details = get_request_details(request_id=request_id)
+    request_details = get_request_details(request_id=request_id, uni_id=BOT_CONFIG["university_id"])
 
     creator_id = unmatch_request(
         request_id=request_id,
@@ -1025,7 +1035,7 @@ async def notify_users_about_pairing(
 ):
     logger.info(f"Sending notifications for request_id: {request_id}.")
 
-    details = get_request_details(request_id=request_id)
+    details = get_request_details(request_id=request_id, uni_id=BOT_CONFIG["university_id"])
     if not details:
         logger.error(f"ERROR details not found for {request_id}")
         return
@@ -1149,7 +1159,7 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
                             f"Failed to send code to specific admin {admin_id}: {e}"
                         )
 
-                save_verification_code(request_id, code)
+                save_verification_code(request_id, code, uni_id=BOT_CONFIG["university_id"])
 
                 promo_addition = (
                     f"\n\n🎁 *Бонус от заведения:*\n"
@@ -1336,7 +1346,7 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     outcome_str = callback_prefix[len("feedback_") :]
     user_id = update.effective_user.id
 
-    details = get_request_details(request_id)
+    details = get_request_details(request_id, uni_id=BOT_CONFIG["university_id"])
     if not details:
         await query.edit_message_text("Встреча не найдена или истекла.")
         return
@@ -1583,6 +1593,15 @@ async def send_confirmations_job(context: ContextTypes.DEFAULT_TYPE):
             )
 
 
+# ---------------------------------------------------------------------------
+# ML МЭТЧИНГ (v2.0) — уведомления
+#
+# Когда matcher service автоматически создаёт пару, он ставит status='matched'
+# и is_match_notification_sent=FALSE.  Этот джоб находит такие заявки,
+# атомарно помечает их notified (UPDATE...RETURNING) и отправляет сообщения.
+# Ручной мэтчинг (pair_user_for_request) сразу ставит TRUE, поэтому
+# дублирование уведомлений исключено.
+# ---------------------------------------------------------------------------
 async def notify_new_matches_job(context: ContextTypes.DEFAULT_TYPE):
     """
     Джоб для уведомления пользователей о новых автоматических матчах от ML matcher.
@@ -1722,7 +1741,7 @@ async def handle_confirmation_button(
         await query.edit_message_text("Ошибка обработки кнопки.")
         return
 
-    details = get_request_details(request_id)
+    details = get_request_details(request_id, uni_id=BOT_CONFIG["university_id"])
     if not details:
         await query.edit_message_text("❌ Эта встреча больше не активна.")
         return
@@ -1733,7 +1752,7 @@ async def handle_confirmation_button(
     )
 
     if both_confirmed:
-        details = get_request_details(request_id)
+        details = get_request_details(request_id, uni_id=BOT_CONFIG["university_id"])
         if details:
             await query.edit_message_text(
                 "✅ Вы подтвердили участие! Оба участника готовы. Контакты отправлены отдельным сообщением."

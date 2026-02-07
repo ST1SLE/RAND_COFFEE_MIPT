@@ -14,6 +14,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./schema.sql:/docker-entrypoint-initdb.d/1_schema.sql
       - ./migrations/001_enable_vector.sql:/docker-entrypoint-initdb.d/2_vector_migration.sql
+      - ./migrations/003_add_interest_matching.sql:/docker-entrypoint-initdb.d/3_interest_matching.sql
 
   bot:
     build: .

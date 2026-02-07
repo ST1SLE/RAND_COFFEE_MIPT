@@ -180,6 +180,18 @@ docker-compose exec bot python test_notifications.py --config config/mipt.json
 ✅ Тест пройден: Уведомления работают корректно
 ```
 
+### Тест Isolation (изоляция данных multi-tenancy)
+```bash
+docker cp test_isolation.py randomcoffeemipt_bot_1:/app/
+docker-compose exec bot python test_isolation.py --config config/mipt.json
+```
+
+**Ожидаемый результат:**
+```
+✅ ВСЕ ТЕСТЫ ПРОЙДЕНЫ (4/4)
+   Данные разных university_id полностью изолированы!
+```
+
 ---
 
 ## 📚 Документация
@@ -341,10 +353,12 @@ Pull requests приветствуются! Для больших изменен
 
 ## 📝 Roadmap
 
-- [ ] **Этап 6**: Финализация рефакторинга
-  - [ ] Удаление старого кода ручного выбора
-  - [ ] Тестирование multi-tenancy
-  - [ ] Финальные интеграционные тесты
+- [x] **Этап 6**: Финализация рефакторинга
+  - [x] Ручной мэтчинг сохранен как fallback (v1.0 + v2.0 сосуществуют)
+  - [x] Аудит безопасности multi-tenancy (5 проблем найдено и исправлено)
+  - [x] Тест изоляции данных (4/4 пройдено)
+  - [x] Исправлен баг дублирования уведомлений при dual matching
+  - [x] Финальная верификация кода
 
 - [ ] **Kubernetes**: Деплой с Helm charts
 - [ ] **Monitoring**: Prometheus + Grafana

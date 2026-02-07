@@ -240,7 +240,11 @@ def reset_user_streak(user_id: int, uni_id: int):
         print(f"ERROR in reset_user_streak: {e}")
 
 
-def get_request_details(request_id: int) -> dict:
+def get_request_details(request_id: int, uni_id: int) -> dict:
+    """
+    Получает детали заявки по request_id.
+    Фильтрация по university_id обязательна (SaaS-compliance).
+    """
     sql = """
     SELECT
         r.creator_user_id,
@@ -260,13 +264,14 @@ def get_request_details(request_id: int) -> dict:
     LEFT JOIN
         users as p ON r.partner_user_id = p.user_id
     WHERE
-        r.request_id = %s;
+        r.request_id = %s
+        AND r.university_id = %s;
     """
 
     try:
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
-                cur.execute(sql, (request_id,))
+                cur.execute(sql, (request_id, uni_id))
                 result = cur.fetchone()
                 return result if result else {}
     except Exception as e:
@@ -397,27 +402,35 @@ def get_user_requests(user_id: int, uni_id: int) -> list:
 
 
 def pair_user_for_request(request_id: int, partner_user_id: int, uni_id: int) -> bool:
+    """
+    Ручной мэтчинг (v1.0 fallback): пользователь сам выбирает заявку.
+
+    Ставим is_match_notification_sent = TRUE, чтобы notify_new_matches_job
+    не отправил дубликат уведомления (уведомление уже уходит через
+    notify_users_about_pairing в bot.py).
+    """
     success = False
     sql = """
     UPDATE coffee_requests
-    SET 
+    SET
         partner_user_id = %s,
         status = 'matched',
-        is_confirmed_by_partner = CASE 
-            WHEN meet_time < (NOW() + INTERVAL '45 minutes') THEN TRUE 
-            ELSE FALSE 
+        is_match_notification_sent = TRUE,
+        is_confirmed_by_partner = CASE
+            WHEN meet_time < (NOW() + INTERVAL '45 minutes') THEN TRUE
+            ELSE FALSE
         END,
-        is_confirmed_by_creator = CASE 
-            WHEN meet_time < (NOW() + INTERVAL '45 minutes') THEN TRUE 
-            ELSE FALSE 
+        is_confirmed_by_creator = CASE
+            WHEN meet_time < (NOW() + INTERVAL '45 minutes') THEN TRUE
+            ELSE FALSE
         END,
-        is_confirmation_sent = CASE 
-            WHEN meet_time < (NOW() + INTERVAL '45 minutes') THEN TRUE 
-            ELSE FALSE 
+        is_confirmation_sent = CASE
+            WHEN meet_time < (NOW() + INTERVAL '45 minutes') THEN TRUE
+            ELSE FALSE
         END
     WHERE
-        request_id = %s 
-        AND status = 'pending' 
+        request_id = %s
+        AND status = 'pending'
         AND partner_user_id IS NULL
         AND university_id = %s;
     """
@@ -515,8 +528,8 @@ def cancel_request_by_creator(
 
                     if should_reset_streak:
                         cur.execute(
-                            "UPDATE users SET coffee_streak = 0 WHERE user_id = %s",
-                            (creator_user_id,),
+                            "UPDATE users SET coffee_streak = 0 WHERE user_id = %s AND university_id = %s",
+                            (creator_user_id, uni_id),
                         )
 
                     log_cancellation_event(
@@ -560,8 +573,8 @@ def unmatch_request(request_id: int, partner_user_id: int, uni_id: int) -> int |
 
                     if should_reset_streak:
                         cur.execute(
-                            "UPDATE users SET coffee_streak = 0 WHERE user_id = %s",
-                            (partner_user_id,),
+                            "UPDATE users SET coffee_streak = 0 WHERE user_id = %s AND university_id = %s",
+                            (partner_user_id, uni_id),
                         )
 
                     log_cancellation_event(
@@ -618,12 +631,16 @@ def get_meetings_for_icebreaker(uni_id: int) -> list:
     return meetings
 
 
-def save_verification_code(request_id: int, code: str):
-    sql = "UPDATE coffee_requests SET verification_code = %s WHERE request_id = %s;"
+def save_verification_code(request_id: int, code: str, uni_id: int):
+    """
+    Сохраняет код верификации для заявки.
+    Фильтрация по university_id обязательна (SaaS-compliance).
+    """
+    sql = "UPDATE coffee_requests SET verification_code = %s WHERE request_id = %s AND university_id = %s;"
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (code, request_id))
+                cur.execute(sql, (code, request_id, uni_id))
                 conn.commit()
     except Exception as e:
         print(f"ERROR in save_verification_code: {e}")
@@ -926,18 +943,17 @@ def ban_user(user_id: int, uni_id: int):
         print(f"ERROR in ban_user: {e}")
 
 
-def is_user_active(user_id: int, uni_id=None) -> bool:
-    if uni_id:
-        sql = "SELECT is_active FROM users WHERE user_id = %s AND university_id = %s;"
-        params = (user_id, uni_id)
-    else:
-        sql = "SELECT is_active FROM users WHERE user_id = %s;"
-        params = (user_id,)
+def is_user_active(user_id: int, uni_id: int) -> bool:
+    """
+    Проверяет, активен ли пользователь.
+    uni_id обязателен (SaaS-compliance).
+    """
+    sql = "SELECT is_active FROM users WHERE user_id = %s AND university_id = %s;"
 
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, params)
+                cur.execute(sql, (user_id, uni_id))
                 result = cur.fetchone()
                 if result:
                     return result[0]

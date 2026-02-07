@@ -41,7 +41,8 @@ CREATE TABLE users (
     year_as_student INTEGER,
     no_show_count INTEGER DEFAULT 0,
     coffee_streak INTEGER DEFAULT 0,
-    university_id INTEGER REFERENCES universities(id)
+    university_id INTEGER REFERENCES universities(id),
+    is_searching_interest_match BOOLEAN DEFAULT FALSE
 );
 
 -- Таблица кофеен
@@ -100,6 +101,24 @@ CREATE TABLE cancellation_logs (
 );
 
 
+-- Таблица мэтчей по интересам (режим "Мэтчинг по интересам")
+CREATE TABLE interest_matches (
+    match_id SERIAL PRIMARY KEY,
+    user_1_id BIGINT NOT NULL REFERENCES users(user_id),
+    user_2_id BIGINT NOT NULL REFERENCES users(user_id),
+    similarity_score REAL NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'proposed',
+    coffee_request_id INTEGER REFERENCES coffee_requests(request_id),
+    proposed_shop_id INTEGER REFERENCES coffee_shops(shop_id),
+    proposed_meet_time TIMESTAMP WITH TIME ZONE,
+    proposed_by BIGINT REFERENCES users(user_id),
+    negotiation_round INTEGER DEFAULT 0,
+    university_id INTEGER NOT NULL REFERENCES universities(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    is_notification_sent BOOLEAN DEFAULT FALSE
+);
+
 -- Индексы для ускорения выборок
 CREATE INDEX ON coffee_requests (creator_user_id);
 CREATE INDEX ON coffee_requests (partner_user_id);
@@ -114,3 +133,6 @@ CREATE INDEX ON cancellation_logs (user_id);
 CREATE INDEX ON users (university_id);
 
 CREATE INDEX ON coffee_shops (university_id);
+
+CREATE INDEX idx_interest_matches_status ON interest_matches(status, university_id);
+CREATE INDEX idx_interest_matches_users ON interest_matches(user_1_id, user_2_id);

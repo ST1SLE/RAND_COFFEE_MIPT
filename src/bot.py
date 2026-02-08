@@ -34,7 +34,7 @@ from db import (
     get_pending_requests,
     pair_user_for_request,
     get_request_details,
-    get_user_details,  # Обновлена (принимает uni_id)
+    get_user_details,
     get_user_requests,
     cancel_request,
     get_meetings_for_reminder,
@@ -45,8 +45,8 @@ from db import (
     mark_feedback_as_requested,
     get_meetings_for_feedback,
     save_meeting_outcome,
-    update_user_profile,  # Обновлена (принимает bio и uni_id)
-    update_user_bio,  # НОВАЯ функция
+    update_user_profile,
+    update_user_bio,
     get_meetings_for_icebreaker,
     get_all_active_users,
     save_feedback_text,
@@ -60,7 +60,19 @@ from db import (
     reset_user_streak,
     init_db_pool,
     save_verification_code,
-    get_new_matches_for_notification,  # ML matcher уведомления
+    get_new_matches_for_notification,
+    # Мэтчинг по интересам
+    set_interest_search,
+    is_user_searching_interest,
+    get_interest_search_count,
+    has_user_bio,
+    get_pending_interest_match,
+    get_interest_match_by_id,
+    get_new_interest_matches_for_notification,
+    propose_meeting,
+    accept_meeting_proposal,
+    decline_interest_match,
+    expire_interest_matches,
 )
 
 load_dotenv()
@@ -86,7 +98,13 @@ logger = logging.getLogger(__name__)
     REGISTER_BIO,
     EDITING_PROFILE,
     EDITING_BIO,
-) = range(12)
+    INTEREST_MATCH_MENU,
+    INTEREST_PROPOSE_SHOP,
+    INTEREST_PROPOSE_DATE,
+    INTEREST_PROPOSE_TIME,
+) = range(16)
+
+MAX_NEGOTIATION_ROUNDS = 5
 
 STATUS_CONFIG = {
     "pending": {
@@ -126,6 +144,7 @@ async def show_main_menu_keyboard(
 ):
     keyboard = [
         ["☕️ Найти компанию", "📂 Мои заявки"],
+        ["🔍 Мэтчинг по интересам"],
         ["👤 Мой профиль", "ℹ️ Гайд"],
     ]
     reply_markup = ReplyKeyboardMarkup(
@@ -367,13 +386,16 @@ async def post_init(app):
         ]
     )
 
-    app.job_queue.run_repeating(notify_new_matches_job, interval=120, first=25)  # Новый джоб для ML матчей
+    app.job_queue.run_repeating(notify_new_matches_job, interval=120, first=25)
     app.job_queue.run_repeating(send_confirmations_job, interval=300, first=30)
     app.job_queue.run_repeating(send_icebreakers, interval=60, first=20)
     app.job_queue.run_repeating(send_reminders, interval=60, first=10)
     app.job_queue.run_repeating(expire_requests, interval=60, first=15)
     app.job_queue.run_repeating(request_feedback, interval=1800, first=60)
     app.job_queue.run_repeating(auto_cancel_job, interval=300, first=40)
+    # Мэтчинг по интересам
+    app.job_queue.run_repeating(notify_interest_matches_job, interval=120, first=35)
+    app.job_queue.run_repeating(expire_interest_matches_job, interval=1800, first=90)
 
 
 async def find_company_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1840,6 +1862,517 @@ async def auto_cancel_job(context: ContextTypes.DEFAULT_TYPE):
             )
 
 
+# ============================================================
+# МЭТЧИНГ ПО ИНТЕРЕСАМ — хэндлеры
+# ============================================================
+
+
+async def interest_match_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Главное меню режима мэтчинга по интересам."""
+    user_id = update.effective_user.id
+    uni_id = BOT_CONFIG["university_id"]
+
+    if not is_user_active(user_id, uni_id=uni_id):
+        await update.message.reply_text("🚫 Вы заблокированы.")
+        return ConversationHandler.END
+
+    # Есть ли активный interest_match?
+    pending_match = get_pending_interest_match(user_id, uni_id)
+    if pending_match:
+        return await _show_interest_match_status(update, context, pending_match)
+
+    # В режиме поиска?
+    is_searching = is_user_searching_interest(user_id, uni_id)
+    if is_searching:
+        pool_count = get_interest_search_count(uni_id)
+        text = (
+            "✅ Вы в режиме мэтчинга по интересам.\n\n"
+            f"Участников в пуле: {pool_count}\n"
+            "Следующий мэтчинг: ~завтра\n\n"
+            "Вы по-прежнему можете создавать заявки и откликаться на чужие в обычном режиме."
+        )
+        keyboard = [
+            [InlineKeyboardButton("❌ Выйти из режима", callback_data="interest_exit")],
+            [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(text, reply_markup=reply_markup)
+        return INTEREST_MATCH_MENU
+
+    # Не в режиме — предлагаем войти
+    if not has_user_bio(user_id, uni_id):
+        await update.message.reply_text(
+            "Для участия в мэтчинге по интересам нужно заполнить раздел «О себе» в профиле.\n\n"
+            "Перейдите в «👤 Мой профиль» и добавьте информацию о себе."
+        )
+        return ConversationHandler.END
+
+    pool_count = get_interest_search_count(uni_id)
+    text = (
+        "🔍 *Мэтчинг по интересам*\n\n"
+        "Войдите в режим поиска, и раз в 1-2 дня мы подберем вам собеседника "
+        "на основе ваших интересов.\n\n"
+        f"Участников в пуле: {pool_count}\n\n"
+        "📊 Вы также можете продолжать создавать заявки "
+        "и откликаться на чужие в обычном режиме."
+    )
+    keyboard = [
+        [InlineKeyboardButton("🔍 Войти в режим поиска", callback_data="interest_enter")],
+        [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+    return INTEREST_MATCH_MENU
+
+
+async def _show_interest_match_status(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, match: dict
+) -> int:
+    """Показывает статус активного interest_match в меню."""
+    user_id = update.effective_user.id
+    partner_name = match["user_2_name"] if match["user_1_id"] == user_id else match["user_1_name"]
+    similarity_pct = max(0, round(match["similarity_score"] * 100))
+
+    if match["status"] == "proposed":
+        text = (
+            f"🎯 У вас есть мэтч по интересам!\n\n"
+            f"👤 Партнер: {partner_name}\n"
+            f"📊 Совместимость: {similarity_pct}%\n\n"
+            f"Чтобы встреча состоялась, нужно договориться о месте и времени."
+        )
+        keyboard = [
+            [InlineKeyboardButton("☕ Предложить встречу", callback_data=f"interest_propose_{match['match_id']}")],
+            [InlineKeyboardButton("❌ Отклонить", callback_data=f"interest_decline_{match['match_id']}")],
+            [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],
+        ]
+    else:  # negotiating
+        rounds_left = MAX_NEGOTIATION_ROUNDS - match["negotiation_round"]
+        if match["proposed_by"] == user_id:
+            meet_time_moscow = match["proposed_meet_time"].astimezone(MOSCOW_TIMEZONE)
+            text = (
+                f"⏳ Ожидание ответа от {partner_name}\n\n"
+                f"Ваше предложение:\n"
+                f"📍 {match['shop_name']}\n"
+                f"📅 {meet_time_moscow.strftime('%d.%m')} в {meet_time_moscow.strftime('%H:%M')}\n"
+                f"📊 Совместимость: {similarity_pct}%\n"
+                f"🔄 Осталось попыток: {rounds_left}"
+            )
+            keyboard = [
+                [InlineKeyboardButton("❌ Отклонить мэтч", callback_data=f"interest_decline_{match['match_id']}")],
+                [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],
+            ]
+        else:
+            meet_time_moscow = match["proposed_meet_time"].astimezone(MOSCOW_TIMEZONE)
+            text = (
+                f"☕ Предложение встречи от {partner_name}!\n\n"
+                f"📍 Кофейня: {match['shop_name']}\n"
+                f"📅 Дата: {meet_time_moscow.strftime('%d.%m')}\n"
+                f"🕐 Время: {meet_time_moscow.strftime('%H:%M')}\n"
+                f"📊 Совместимость: {similarity_pct}%\n"
+                f"🔄 Осталось попыток: {rounds_left}"
+            )
+            keyboard = [
+                [InlineKeyboardButton("✅ Принять", callback_data=f"proposal_accept_{match['match_id']}")],
+                [InlineKeyboardButton("🔄 Предложить другое", callback_data=f"proposal_counter_{match['match_id']}")],
+                [InlineKeyboardButton("❌ Отклонить", callback_data=f"proposal_decline_{match['match_id']}")],
+                [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],
+            ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(text, reply_markup=reply_markup)
+    return INTEREST_MATCH_MENU
+
+
+async def interest_match_enter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Вход в режим поиска по интересам."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    uni_id = BOT_CONFIG["university_id"]
+
+    set_interest_search(user_id, uni_id, True)
+    pool_count = get_interest_search_count(uni_id)
+
+    text = (
+        "✅ Вы вошли в режим мэтчинга по интересам!\n\n"
+        f"Участников в пуле: {pool_count}\n"
+        "Раз в 1-2 дня мы подберем вам собеседника на основе ваших интересов.\n\n"
+        "📊 Вы также можете продолжать создавать заявки "
+        "и откликаться на чужие в обычном режиме."
+    )
+
+    await query.edit_message_text(text)
+    await show_main_menu_keyboard(update, context, "Главное меню:")
+    return ConversationHandler.END
+
+
+async def interest_match_exit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Выход из режима поиска по интересам."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    uni_id = BOT_CONFIG["university_id"]
+
+    set_interest_search(user_id, uni_id, False)
+
+    await query.edit_message_text(
+        "Вы вышли из режима мэтчинга по интересам. Вы можете вернуться в любой момент."
+    )
+    await show_main_menu_keyboard(update, context, "Главное меню:")
+    return ConversationHandler.END
+
+
+async def interest_propose_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Начало предложения встречи (выбор кофейни). Entry point для propose и counter."""
+    query = update.callback_query
+    await query.answer()
+
+    match_id = int(query.data.split("_")[-1])
+    uni_id = BOT_CONFIG["university_id"]
+    user_id = update.effective_user.id
+
+    match = get_interest_match_by_id(match_id, uni_id)
+    if not match or match["status"] not in ("proposed", "negotiating"):
+        await query.edit_message_text("Этот мэтч больше не активен.")
+        return ConversationHandler.END
+
+    if user_id not in (match["user_1_id"], match["user_2_id"]):
+        await query.edit_message_text("У вас нет доступа к этому мэтчу.")
+        return ConversationHandler.END
+
+    if match["status"] == "negotiating" and match["proposed_by"] == user_id:
+        await query.edit_message_text("Ожидайте ответа партнера на ваше предложение.")
+        return ConversationHandler.END
+
+    if match["negotiation_round"] >= MAX_NEGOTIATION_ROUNDS:
+        await query.edit_message_text("Достигнут лимит попыток согласования.")
+        return ConversationHandler.END
+
+    context.user_data["interest_match_id"] = match_id
+
+    shops = get_active_coffee_shops(uni_id=uni_id)
+    if not shops:
+        await query.edit_message_text("К сожалению, сейчас нет активных кофеен.")
+        return ConversationHandler.END
+
+    buttons = []
+    for row in shops:
+        shop_id = row[0]
+        name = row[1]
+        promo_label = row[2] if len(row) > 2 else None
+        label = f"📍 {name}"
+        if promo_label:
+            label += f" {promo_label}"
+        buttons.append((label, f"ishop_{shop_id}"))
+
+    buttons.append(("⬅️ Назад в меню", "main_menu"))
+    reply_markup = build_inline_keyboard(buttons_data=buttons)
+
+    await query.edit_message_text(
+        "Выберите кофейню для встречи:", reply_markup=reply_markup
+    )
+    return INTEREST_PROPOSE_SHOP
+
+
+async def interest_propose_shop_selected(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Кофейня выбрана, переходим к дате."""
+    query = update.callback_query
+    await query.answer()
+
+    shop_id = int(query.data.split("_")[1])
+    context.user_data["interest_shop_id"] = shop_id
+
+    back_button = build_inline_keyboard([("⬅️ Назад в меню", "main_menu")])
+
+    await query.edit_message_text(
+        "Теперь введите дату встречи в формате *ДД.ММ* (например, *25.02*).",
+        reply_markup=back_button,
+        parse_mode="Markdown",
+    )
+    return INTEREST_PROPOSE_DATE
+
+
+async def interest_propose_date(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Дата введена, переходим к времени."""
+    user_date_str = update.message.text
+
+    if not re.match(r"^(\d{1,2})\.(\d{1,2})$", user_date_str):
+        await update.message.reply_text(
+            "Формат даты неверный. Введите как *ДД.ММ*, например: *25.02*",
+            parse_mode="Markdown",
+        )
+        return INTEREST_PROPOSE_DATE
+
+    try:
+        now_moscow = datetime.now(MOSCOW_TIMEZONE)
+        now_date = now_moscow.date()
+        day, month = map(int, user_date_str.split("."))
+        year = now_moscow.year
+        proposed_date = datetime(year, month, day)
+
+        if proposed_date.date() < now_date:
+            year += 1
+            proposed_date = datetime(year, month, day)
+
+        if (proposed_date.date() - now_date).days > 14:
+            await update.message.reply_text(
+                "Выберите дату в пределах следующих 14 дней."
+            )
+            return INTEREST_PROPOSE_DATE
+    except ValueError:
+        await update.message.reply_text(
+            "Такой даты не существует. Введите корректную дату."
+        )
+        return INTEREST_PROPOSE_DATE
+
+    context.user_data["interest_date"] = proposed_date
+
+    back_button = build_inline_keyboard([("⬅️ Назад в меню", "main_menu")])
+    await update.message.reply_text(
+        "Теперь введите время встречи (например, *14:30*).",
+        reply_markup=back_button,
+        parse_mode="Markdown",
+    )
+    return INTEREST_PROPOSE_TIME
+
+
+async def interest_propose_time(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    """Время введено — отправляем предложение партнеру."""
+    user_time_str = update.message.text
+    user_id = update.effective_user.id
+    uni_id = BOT_CONFIG["university_id"]
+
+    time_match = re.match(r"^(\d{1,2}):(\d{1,2})$", user_time_str)
+    if not time_match:
+        await update.message.reply_text(
+            "Формат времени неверный. Введите как *ЧЧ:ММ*, например: *14:30*",
+            parse_mode="Markdown",
+        )
+        return INTEREST_PROPOSE_TIME
+
+    hour, minute = int(time_match.group(1)), int(time_match.group(2))
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        await update.message.reply_text("Некорректное время. Часы: 0-23, минуты: 0-59.")
+        return INTEREST_PROPOSE_TIME
+
+    chosen_date = context.user_data.get("interest_date")
+    if not chosen_date:
+        await update.message.reply_text("Произошла ошибка. Попробуйте заново.")
+        return ConversationHandler.END
+
+    naive_meet_time = chosen_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    meet_time = naive_meet_time.replace(tzinfo=MOSCOW_TIMEZONE)
+
+    if meet_time < datetime.now(MOSCOW_TIMEZONE):
+        await update.message.reply_text("Это время уже прошло! Выберите время в будущем.")
+        return INTEREST_PROPOSE_TIME
+
+    shop_id = context.user_data.get("interest_shop_id")
+    match_id = context.user_data.get("interest_match_id")
+
+    if not shop_id or not match_id:
+        await update.message.reply_text("Произошла ошибка. Попробуйте заново.")
+        return ConversationHandler.END
+
+    working_hours = get_shop_working_hours(shop_id=shop_id, uni_id=uni_id)
+    if not is_shop_open_at_time(working_hours, meet_time):
+        await update.message.reply_text("Кофейня в это время закрыта. Попробуйте другое время.")
+        return INTEREST_PROPOSE_TIME
+
+    success = propose_meeting(match_id, shop_id, meet_time, user_id, uni_id)
+    if not success:
+        await update.message.reply_text(
+            "Не удалось отправить предложение. Возможно, мэтч уже не активен."
+        )
+        return ConversationHandler.END
+
+    # Уведомляем партнера
+    match = get_interest_match_by_id(match_id, uni_id)
+    if match:
+        partner_id = match["user_2_id"] if match["user_1_id"] == user_id else match["user_1_id"]
+        proposer_name = match["user_1_name"] if match["user_1_id"] == user_id else match["user_2_name"]
+        similarity_pct = max(0, round(match["similarity_score"] * 100))
+        rounds_left = MAX_NEGOTIATION_ROUNDS - match["negotiation_round"]
+
+        meet_time_moscow = meet_time.astimezone(MOSCOW_TIMEZONE)
+
+        proposal_text = (
+            f"☕ Предложение встречи от {proposer_name}!\n\n"
+            f"📍 Кофейня: {match['shop_name']}\n"
+            f"📅 Дата: {meet_time_moscow.strftime('%d.%m')}\n"
+            f"🕐 Время: {meet_time_moscow.strftime('%H:%M')}\n"
+            f"📊 Совместимость: {similarity_pct}%\n"
+            f"🔄 Осталось попыток: {rounds_left}"
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("✅ Принять", callback_data=f"proposal_accept_{match_id}")],
+            [InlineKeyboardButton("🔄 Предложить другое", callback_data=f"proposal_counter_{match_id}")],
+            [InlineKeyboardButton("❌ Отклонить", callback_data=f"proposal_decline_{match_id}")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await context.bot.send_message(
+                chat_id=partner_id, text=proposal_text, reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.error(f"Failed to send proposal to {partner_id}: {e}")
+
+    await update.message.reply_text("✅ Предложение отправлено партнеру!")
+    await show_main_menu_keyboard(update, context, "Главное меню:")
+    return ConversationHandler.END
+
+
+async def handle_interest_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отклонение interest_match (standalone callback)."""
+    query = update.callback_query
+    await query.answer()
+
+    match_id = int(query.data.split("_")[-1])
+    uni_id = BOT_CONFIG["university_id"]
+    user_id = update.effective_user.id
+
+    result = decline_interest_match(match_id, uni_id)
+    if result:
+        await query.edit_message_text(
+            "Мэтч отклонен. Вы можете вернуться в режим поиска в любой момент."
+        )
+        partner_id = result["user_2_id"] if result["user_1_id"] == user_id else result["user_1_id"]
+        try:
+            await context.bot.send_message(
+                chat_id=partner_id,
+                text="К сожалению, ваш партнер отклонил встречу. "
+                     "Вы можете вернуться в режим поиска по интересам.",
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify partner {partner_id} about decline: {e}")
+    else:
+        await query.edit_message_text("Этот мэтч больше не активен.")
+
+
+async def handle_proposal_accept(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Принятие предложения встречи (standalone callback)."""
+    query = update.callback_query
+    await query.answer()
+
+    match_id = int(query.data.split("_")[-1])
+    uni_id = BOT_CONFIG["university_id"]
+
+    request_id = accept_meeting_proposal(match_id, uni_id)
+    if not request_id:
+        await query.edit_message_text(
+            "Не удалось принять предложение. Мэтч уже не активен."
+        )
+        return
+
+    await query.edit_message_text("✅ Предложение принято! Встреча создана.")
+    await notify_users_about_pairing(request_id=request_id, context=context)
+
+
+async def handle_proposal_decline(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отклонение предложения встречи (standalone callback)."""
+    query = update.callback_query
+    await query.answer()
+
+    match_id = int(query.data.split("_")[-1])
+    uni_id = BOT_CONFIG["university_id"]
+    user_id = update.effective_user.id
+
+    result = decline_interest_match(match_id, uni_id)
+    if result:
+        await query.edit_message_text("Предложение отклонено. Мэтч отменен.")
+        partner_id = result["user_2_id"] if result["user_1_id"] == user_id else result["user_1_id"]
+        try:
+            await context.bot.send_message(
+                chat_id=partner_id,
+                text="К сожалению, ваш партнер отклонил предложение встречи. Мэтч отменен. "
+                     "Вы можете вернуться в режим поиска по интересам.",
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify partner {partner_id} about proposal decline: {e}")
+    else:
+        await query.edit_message_text("Этот мэтч больше не активен.")
+
+
+async def notify_interest_matches_job(context: ContextTypes.DEFAULT_TYPE):
+    """Джоб: отправка уведомлений о новых interest_matches."""
+    logger.info("JOB: checking for new interest matches to notify...")
+    matches = get_new_interest_matches_for_notification(uni_id=BOT_CONFIG["university_id"])
+    if not matches:
+        return
+
+    logger.info(f"Found {len(matches)} new interest matches to notify.")
+
+    for match in matches:
+        match_id = match["match_id"]
+        user_1_id = match["user_1_id"]
+        user_2_id = match["user_2_id"]
+        similarity_pct = max(0, round(match["similarity_score"] * 100))
+        user_1_name = match["user_1_name"]
+        user_2_name = match["user_2_name"]
+
+        keyboard = [
+            [InlineKeyboardButton("☕ Предложить встречу", callback_data=f"interest_propose_{match_id}")],
+            [InlineKeyboardButton("❌ Отклонить", callback_data=f"interest_decline_{match_id}")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        text_1 = (
+            f"🎯 Мэтчинг по интересам!\n\n"
+            f"Мы нашли для вас собеседника с похожими интересами!\n\n"
+            f"👤 Партнер: {user_2_name}\n"
+            f"📊 Совместимость: {similarity_pct}%\n\n"
+            f"Чтобы встреча состоялась, нужно договориться о месте и времени.\n"
+            f"Один из вас предложит детали встречи, а другой подтвердит."
+        )
+
+        text_2 = (
+            f"🎯 Мэтчинг по интересам!\n\n"
+            f"Мы нашли для вас собеседника с похожими интересами!\n\n"
+            f"👤 Партнер: {user_1_name}\n"
+            f"📊 Совместимость: {similarity_pct}%\n\n"
+            f"Чтобы встреча состоялась, нужно договориться о месте и времени.\n"
+            f"Один из вас предложит детали встречи, а другой подтвердит."
+        )
+
+        try:
+            await context.bot.send_message(chat_id=user_1_id, text=text_1, reply_markup=reply_markup)
+            await context.bot.send_message(chat_id=user_2_id, text=text_2, reply_markup=reply_markup)
+            logger.info(f"Sent interest match notification for match_id: {match_id}")
+        except Exception as e:
+            logger.error(f"Failed to send interest match notification for match_id {match_id}: {e}")
+
+
+async def expire_interest_matches_job(context: ContextTypes.DEFAULT_TYPE):
+    """Джоб: экспирация interest_matches по таймаутам."""
+    logger.info("JOB: checking for expired interest matches...")
+    expired = expire_interest_matches(uni_id=BOT_CONFIG["university_id"])
+    if not expired:
+        return
+
+    logger.info(f"Expired {len(expired)} interest matches.")
+
+    for match_id, user_1_id, user_2_id in expired:
+        text = (
+            "⏰ Время на согласование встречи истекло.\n\n"
+            "Вы можете вернуться в режим поиска по интересам в любой момент."
+        )
+        try:
+            await context.bot.send_message(chat_id=user_1_id, text=text)
+            await context.bot.send_message(chat_id=user_2_id, text=text)
+        except Exception as e:
+            logger.error(f"Failed to notify about expired interest match {match_id}: {e}")
+
+
 def load_config(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -1862,6 +2395,8 @@ async def back_to_main_menu_from_anywhere(
         return await my_requests_start(update, context)
     elif text == "👤 Мой профиль":
         return await my_profile_start(update, context)
+    elif text == "🔍 Мэтчинг по интересам":
+        return await interest_match_menu(update, context)
     elif text == "ℹ️ Гайд":
         await help_command(update, context)
         return ConversationHandler.END
@@ -1900,7 +2435,7 @@ def main():
 
     # Фильтр, который ловит любую главную кнопку меню для выхода из текущего состояния
     MENU_BUTTONS_FILTER = filters.Regex(
-        "^(☕️ Найти компанию|📂 Мои заявки|👤 Мой профиль|ℹ️ Гайд)$"
+        "^(☕️ Найти компанию|📂 Мои заявки|👤 Мой профиль|ℹ️ Гайд|🔍 Мэтчинг по интересам)$"
     )
 
     # 2. Сценарий регистрации
@@ -2022,9 +2557,52 @@ def main():
         allow_reentry=True,
     )
 
+    # 5. Сценарий мэтчинга по интересам
+    interest_match_handler = MessageHandler(
+        filters.Regex("^🔍 Мэтчинг по интересам$"), interest_match_menu
+    )
+    interest_conv = ConversationHandler(
+        entry_points=[
+            interest_match_handler,
+            CallbackQueryHandler(interest_propose_start, pattern="^interest_propose_"),
+            CallbackQueryHandler(interest_propose_start, pattern="^proposal_counter_"),
+        ],
+        states={
+            INTEREST_MATCH_MENU: [
+                CallbackQueryHandler(interest_match_enter, pattern="^interest_enter$"),
+                CallbackQueryHandler(interest_match_exit, pattern="^interest_exit$"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
+            ],
+            INTEREST_PROPOSE_SHOP: [
+                CallbackQueryHandler(interest_propose_shop_selected, pattern="^ishop_"),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
+            ],
+            INTEREST_PROPOSE_DATE: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER,
+                    interest_propose_date,
+                ),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
+            ],
+            INTEREST_PROPOSE_TIME: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER,
+                    interest_propose_time,
+                ),
+                CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            MessageHandler(MENU_BUTTONS_FILTER, back_to_main_menu_from_anywhere),
+        ],
+        allow_reentry=True,
+    )
+
     # Добавляем в строгом порядке
     app.add_handler(registration_conv)
     app.add_handler(profile_conv)  # Профиль выше основного поиска
+    app.add_handler(interest_conv)  # Мэтчинг по интересам
     app.add_handler(conv_handler)
 
     app.add_handler(CommandHandler("start", start))
@@ -2045,6 +2623,11 @@ def main():
             handle_cancel_request_as_creator, pattern="^cancel_matched_"
         )
     )
+
+    # Standalone callbacks для мэтчинга по интересам (не требуют multi-step flow)
+    app.add_handler(CallbackQueryHandler(handle_interest_decline, pattern="^interest_decline_"))
+    app.add_handler(CallbackQueryHandler(handle_proposal_accept, pattern="^proposal_accept_"))
+    app.add_handler(CallbackQueryHandler(handle_proposal_decline, pattern="^proposal_decline_"))
 
     feedback_filter = filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER
     app.add_handler(MessageHandler(feedback_filter, process_feedback_text))

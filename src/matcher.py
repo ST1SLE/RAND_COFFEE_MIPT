@@ -8,7 +8,13 @@
 """
 import numpy as np
 import logging
-from src.db import get_pending_requests_for_matching, get_user_meeting_history, pair_user_for_request
+from src.db import (
+    get_pending_requests_for_matching,
+    get_user_meeting_history,
+    pair_user_for_request,
+    get_interest_search_users,
+    create_interest_match,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -187,4 +193,90 @@ def execute_matching(uni_id: int):
             logger.warning(f"❌ Не удалось замэтчить request {main_request} с partner {partner_user_id}")
 
     logger.info(f"🎉 Мэтчинг завершен: {success_count}/{len(matched_pairs)} пар записано в БД.")
+    return success_count
+
+
+INTEREST_SIMILARITY_THRESHOLD = 0.5
+
+
+def execute_interest_matching(uni_id: int) -> int:
+    """
+    Мэтчинг по интересам: подбирает пары среди пользователей в режиме поиска.
+
+    1. Получает всех пользователей с is_searching_interest_match=TRUE и эмбеддингами
+    2. Вычисляет cosine similarity между всеми парами
+    3. Фильтрует по порогу (INTEREST_SIMILARITY_THRESHOLD) и истории встреч
+    4. Жадно формирует пары с наибольшим сходством
+    5. Создает interest_match записи (status=proposed)
+
+    Returns:
+        int: Количество созданных мэтчей
+    """
+    logger.info(f"🔍 Запуск мэтчинга по интересам для university_id={uni_id}")
+
+    users = get_interest_search_users(uni_id)
+
+    if len(users) < 2:
+        logger.info(f"Недостаточно пользователей в режиме поиска ({len(users)}). Нужно минимум 2.")
+        return 0
+
+    n = len(users)
+    logger.info(f"Пользователей в пуле: {n}")
+
+    user_ids = [u[0] for u in users]
+    embeddings = [parse_pgvector_string(u[1]) for u in users]
+
+    # Предзагружаем историю встреч
+    meeting_histories = {}
+    for uid in user_ids:
+        meeting_histories[uid] = get_user_meeting_history(uid, uni_id)
+
+    # Вычисляем матрицу сходства и формируем кандидатов
+    candidate_pairs = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            sim = cosine_similarity(embeddings[i], embeddings[j])
+
+            # Порог совместимости
+            if sim < INTEREST_SIMILARITY_THRESHOLD:
+                continue
+
+            # Проверяем историю встреч
+            if user_ids[j] in meeting_histories.get(user_ids[i], set()):
+                logger.debug(f"Пропускаем ({user_ids[i]}, {user_ids[j]}) — уже встречались.")
+                continue
+
+            candidate_pairs.append((i, j, sim))
+
+    if not candidate_pairs:
+        logger.info("Не найдено подходящих пар выше порога совместимости.")
+        return 0
+
+    # Сортируем по убыванию сходства
+    candidate_pairs.sort(key=lambda x: x[2], reverse=True)
+
+    # Жадно выбираем пары
+    used_indices = set()
+    success_count = 0
+
+    for i, j, sim_score in candidate_pairs:
+        if i in used_indices or j in used_indices:
+            continue
+
+        user_i = user_ids[i]
+        user_j = user_ids[j]
+
+        match_id = create_interest_match(user_i, user_j, sim_score, uni_id)
+        if match_id:
+            success_count += 1
+            used_indices.add(i)
+            used_indices.add(j)
+            logger.info(
+                f"✅ Interest match #{match_id}: User {user_i} ↔ User {user_j}, "
+                f"Similarity: {sim_score:.3f}"
+            )
+        else:
+            logger.warning(f"❌ Не удалось создать interest_match для ({user_i}, {user_j})")
+
+    logger.info(f"🎉 Мэтчинг по интересам завершен: {success_count} пар создано.")
     return success_count

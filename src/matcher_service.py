@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Сервис для автоматического мэтчинга пользователей на основе косинусного сходства.
+Сервис мэтчинга по интересам.
 
 Запускается как отдельный контейнер в docker-compose.
-Периодически (каждые 5 минут) ищет pending заявки и создает пары.
+Раз в день подбирает пары среди пользователей в режиме поиска
+на основе косинусного сходства эмбеддингов.
 """
-import os
 import time
 import logging
 import argparse
@@ -13,7 +13,7 @@ import json
 import schedule
 from dotenv import load_dotenv
 from src.db import init_db_pool
-from src.matcher import execute_matching
+from src.matcher import execute_interest_matching
 
 load_dotenv()
 
@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 MATCHER_CONFIG = {}
 
+# Время ежедневного запуска мэтчинга (МСК)
+MATCHING_TIME = "12:00"
+
 
 def load_config(path: str):
     """Загружает конфигурацию из JSON файла."""
@@ -32,10 +35,10 @@ def load_config(path: str):
         return json.load(f)
 
 
-def run_matching_job():
+def run_interest_matching_job():
     """
-    Функция для периодического запуска мэтчинга.
-    Получает конфиг, запускает execute_matching для заданного university_id.
+    Ежедневный мэтчинг по интересам.
+    Подбирает пары среди пользователей с is_searching_interest_match=TRUE.
     """
     uni_id = MATCHER_CONFIG.get("university_id")
     if not uni_id:
@@ -43,43 +46,40 @@ def run_matching_job():
         return
 
     try:
-        logger.info(f"🔄 Starting matching job for university_id={uni_id}")
-        matched_count = execute_matching(uni_id)
+        logger.info(f"🔍 Starting interest matching job for university_id={uni_id}")
+        matched_count = execute_interest_matching(uni_id)
 
         if matched_count > 0:
-            logger.info(f"✅ Matching job completed: {matched_count} pairs created.")
+            logger.info(f"✅ Interest matching completed: {matched_count} pairs created.")
         else:
-            logger.info("No new matches created this cycle.")
+            logger.info("No new interest matches created this cycle.")
     except Exception as e:
-        logger.error(f"ERROR in run_matching_job: {e}", exc_info=True)
+        logger.error(f"ERROR in run_interest_matching_job: {e}", exc_info=True)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Matcher Service for Random Coffee Bot")
+    parser = argparse.ArgumentParser(description="Interest Matching Service for Random Coffee Bot")
     parser.add_argument("--config", help="Path to configuration file", required=True)
     args = parser.parse_args()
 
     global MATCHER_CONFIG
     MATCHER_CONFIG = load_config(args.config)
 
-    logger.info(f"🚀 Matcher Service starting for university_id={MATCHER_CONFIG.get('university_id')}")
-    logger.info(f"Running matching every 5 minutes...")
+    logger.info(f"🚀 Interest Matching Service starting for university_id={MATCHER_CONFIG.get('university_id')}")
 
-    # Инициализация БД
     init_db_pool()
 
-    # Настройка расписания: запуск каждые 5 минут
-    schedule.every(5).minutes.do(run_matching_job)
+    # Ежедневный запуск в MATCHING_TIME
+    schedule.every().day.at(MATCHING_TIME).do(run_interest_matching_job)
 
-    logger.info("🎯 Matcher service is running. Checking for matches every 5 minutes...")
+    logger.info(f"🎯 Interest matching service is running. Matching daily at {MATCHING_TIME}.")
 
-    # Запускаем первую проверку сразу (не ждем 5 минут)
-    run_matching_job()
+    # Первый запуск сразу при старте
+    run_interest_matching_job()
 
-    # Бесконечный цикл
     while True:
         schedule.run_pending()
-        time.sleep(1)
+        time.sleep(60)
 
 
 if __name__ == "__main__":

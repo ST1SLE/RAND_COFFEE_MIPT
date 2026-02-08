@@ -1137,6 +1137,408 @@ def get_new_matches_for_notification(uni_id: int):
         return []
 
 
+# ============================================================
+# Режим "Мэтчинг по интересам" — функции для interest_matches
+# ============================================================
+
+
+def set_interest_search(user_id: int, uni_id: int, active: bool):
+    """Включает/выключает режим поиска по интересам для пользователя."""
+    sql = """
+    UPDATE users
+    SET is_searching_interest_match = %s
+    WHERE user_id = %s AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (active, user_id, uni_id))
+                conn.commit()
+    except Exception as e:
+        print(f"ERROR in set_interest_search: {e}")
+
+
+def is_user_searching_interest(user_id: int, uni_id: int) -> bool:
+    """Проверяет, находится ли пользователь в режиме поиска по интересам."""
+    sql = """
+    SELECT is_searching_interest_match
+    FROM users
+    WHERE user_id = %s AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id, uni_id))
+                result = cur.fetchone()
+                return result[0] if result else False
+    except Exception as e:
+        print(f"ERROR in is_user_searching_interest: {e}")
+        return False
+
+
+def get_interest_search_count(uni_id: int) -> int:
+    """Возвращает количество пользователей в режиме поиска по интересам."""
+    sql = """
+    SELECT COUNT(*)
+    FROM users
+    WHERE is_searching_interest_match = TRUE
+      AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (uni_id,))
+                result = cur.fetchone()
+                return result[0] if result else 0
+    except Exception as e:
+        print(f"ERROR in get_interest_search_count: {e}")
+        return 0
+
+
+def get_interest_search_users(uni_id: int) -> list:
+    """
+    Возвращает пользователей в режиме поиска с готовыми эмбеддингами.
+    Returns: [(user_id, embedding), ...]
+    """
+    sql = """
+    SELECT user_id, embedding
+    FROM users
+    WHERE is_searching_interest_match = TRUE
+      AND embedding IS NOT NULL
+      AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (uni_id,))
+                return cur.fetchall()
+    except Exception as e:
+        print(f"ERROR in get_interest_search_users: {e}")
+        return []
+
+
+def create_interest_match(user_1: int, user_2: int, similarity: float, uni_id: int) -> int | None:
+    """
+    Создает interest_match и снимает is_searching у обоих пользователей.
+    Атомарная операция в одной транзакции.
+    Returns: match_id или None при ошибке.
+    """
+    insert_sql = """
+    INSERT INTO interest_matches (user_1_id, user_2_id, similarity_score, university_id)
+    VALUES (%s, %s, %s, %s)
+    RETURNING match_id;
+    """
+    reset_sql = """
+    UPDATE users
+    SET is_searching_interest_match = FALSE
+    WHERE user_id IN (%s, %s) AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(insert_sql, (user_1, user_2, similarity, uni_id))
+                match_id = cur.fetchone()[0]
+                cur.execute(reset_sql, (user_1, user_2, uni_id))
+                conn.commit()
+                return match_id
+    except Exception as e:
+        print(f"ERROR in create_interest_match: {e}")
+        return None
+
+
+def get_pending_interest_match(user_id: int, uni_id: int) -> dict | None:
+    """
+    Возвращает активный interest_match для пользователя (proposed или negotiating).
+    Пользователь может быть user_1 или user_2.
+    """
+    sql = """
+    SELECT
+        im.match_id,
+        im.user_1_id,
+        im.user_2_id,
+        im.similarity_score,
+        im.status,
+        im.proposed_shop_id,
+        im.proposed_meet_time,
+        im.proposed_by,
+        im.negotiation_round,
+        im.created_at,
+        im.updated_at,
+        u1.first_name as user_1_name,
+        u2.first_name as user_2_name,
+        s.name as shop_name
+    FROM interest_matches im
+    JOIN users u1 ON im.user_1_id = u1.user_id
+    JOIN users u2 ON im.user_2_id = u2.user_id
+    LEFT JOIN coffee_shops s ON im.proposed_shop_id = s.shop_id
+    WHERE (im.user_1_id = %s OR im.user_2_id = %s)
+      AND im.status IN ('proposed', 'negotiating')
+      AND im.university_id = %s
+    ORDER BY im.created_at DESC
+    LIMIT 1;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(sql, (user_id, user_id, uni_id))
+                result = cur.fetchone()
+                return dict(result) if result else None
+    except Exception as e:
+        print(f"ERROR in get_pending_interest_match: {e}")
+        return None
+
+
+def get_new_interest_matches_for_notification(uni_id: int) -> list:
+    """
+    Получает interest_matches со статусом 'proposed', для которых еще не отправлено уведомление.
+    Атомарно ставит is_notification_sent = TRUE (UPDATE...RETURNING + FOR UPDATE SKIP LOCKED).
+    """
+    sql = """
+    UPDATE interest_matches
+    SET is_notification_sent = TRUE
+    WHERE match_id IN (
+        SELECT match_id
+        FROM interest_matches
+        WHERE status = 'proposed'
+          AND is_notification_sent = FALSE
+          AND university_id = %s
+        FOR UPDATE SKIP LOCKED
+    )
+    RETURNING
+        match_id,
+        user_1_id,
+        user_2_id,
+        similarity_score,
+        (SELECT first_name FROM users WHERE user_id = user_1_id) as user_1_name,
+        (SELECT first_name FROM users WHERE user_id = user_2_id) as user_2_name;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(sql, (uni_id,))
+                matches = cur.fetchall()
+                conn.commit()
+                return matches
+    except Exception as e:
+        print(f"ERROR in get_new_interest_matches_for_notification: {e}")
+        return []
+
+
+def propose_meeting(match_id: int, shop_id: int, meet_time: datetime, proposed_by: int, uni_id: int) -> bool:
+    """
+    Устанавливает предложение встречи (кофейня + время) от одного из участников.
+    Переводит статус в 'negotiating', увеличивает negotiation_round.
+    """
+    sql = """
+    UPDATE interest_matches
+    SET status = 'negotiating',
+        proposed_shop_id = %s,
+        proposed_meet_time = %s,
+        proposed_by = %s,
+        negotiation_round = negotiation_round + 1,
+        updated_at = NOW()
+    WHERE match_id = %s
+      AND status IN ('proposed', 'negotiating')
+      AND university_id = %s
+      AND negotiation_round < 5;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (shop_id, meet_time, proposed_by, match_id, uni_id))
+                success = cur.rowcount == 1
+                conn.commit()
+                return success
+    except Exception as e:
+        print(f"ERROR in propose_meeting: {e}")
+        return False
+
+
+def accept_meeting_proposal(match_id: int, uni_id: int) -> int | None:
+    """
+    Принимает предложение встречи: создает coffee_request со статусом 'matched',
+    обновляет interest_match → 'accepted'. Атомарная транзакция.
+
+    Спонтанные встречи (< 45 мин до meet_time): оба автоподтверждены.
+
+    Returns: request_id созданной заявки или None при ошибке.
+    """
+    get_sql = """
+    SELECT match_id, user_1_id, user_2_id, proposed_shop_id, proposed_meet_time
+    FROM interest_matches
+    WHERE match_id = %s
+      AND status = 'negotiating'
+      AND proposed_shop_id IS NOT NULL
+      AND proposed_meet_time IS NOT NULL
+      AND university_id = %s
+    FOR UPDATE;
+    """
+    create_request_sql = """
+    INSERT INTO coffee_requests (
+        creator_user_id, partner_user_id, shop_id, meet_time,
+        status, created_at, is_reminder_sent, is_failure_notification_sent,
+        is_match_notification_sent,
+        is_confirmed_by_creator, is_confirmed_by_partner, is_confirmation_sent,
+        university_id
+    ) VALUES (
+        %s, %s, %s, %s,
+        'matched', NOW(), FALSE, FALSE,
+        TRUE,
+        CASE WHEN %s < (NOW() + INTERVAL '45 minutes') THEN TRUE ELSE FALSE END,
+        CASE WHEN %s < (NOW() + INTERVAL '45 minutes') THEN TRUE ELSE FALSE END,
+        CASE WHEN %s < (NOW() + INTERVAL '45 minutes') THEN TRUE ELSE FALSE END,
+        %s
+    )
+    RETURNING request_id;
+    """
+    update_match_sql = """
+    UPDATE interest_matches
+    SET status = 'accepted',
+        coffee_request_id = %s,
+        updated_at = NOW()
+    WHERE match_id = %s AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(get_sql, (match_id, uni_id))
+                match = cur.fetchone()
+                if not match:
+                    conn.rollback()
+                    return None
+
+                _, user_1, user_2, shop_id, meet_time = match
+
+                cur.execute(create_request_sql, (
+                    user_1, user_2, shop_id, meet_time,
+                    meet_time, meet_time, meet_time,
+                    uni_id
+                ))
+                request_id = cur.fetchone()[0]
+
+                cur.execute(update_match_sql, (request_id, match_id, uni_id))
+                conn.commit()
+                return request_id
+    except Exception as e:
+        print(f"ERROR in accept_meeting_proposal: {e}")
+        return None
+
+
+def decline_interest_match(match_id: int, uni_id: int) -> dict | None:
+    """
+    Отклоняет interest_match. Возвращает данные обоих пользователей для уведомления.
+    """
+    sql = """
+    UPDATE interest_matches
+    SET status = 'declined', updated_at = NOW()
+    WHERE match_id = %s
+      AND status IN ('proposed', 'negotiating')
+      AND university_id = %s
+    RETURNING user_1_id, user_2_id;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (match_id, uni_id))
+                result = cur.fetchone()
+                conn.commit()
+                if result:
+                    return {"user_1_id": result[0], "user_2_id": result[1]}
+                return None
+    except Exception as e:
+        print(f"ERROR in decline_interest_match: {e}")
+        return None
+
+
+def expire_interest_matches(uni_id: int) -> list:
+    """
+    Экспирирует interest_matches по таймаутам:
+    - proposed: 24ч без реакции
+    - negotiating: 12ч без ответа на предложение
+    - negotiation_round >= 5: слишком много раундов
+
+    Returns: [(match_id, user_1_id, user_2_id), ...]
+    """
+    sql = """
+    UPDATE interest_matches
+    SET status = 'expired', updated_at = NOW()
+    WHERE match_id IN (
+        SELECT match_id
+        FROM interest_matches
+        WHERE university_id = %s
+          AND status IN ('proposed', 'negotiating')
+          AND (
+              (status = 'proposed' AND created_at < NOW() - INTERVAL '24 hours')
+              OR (status = 'negotiating' AND updated_at < NOW() - INTERVAL '12 hours')
+              OR (negotiation_round >= 5)
+          )
+        FOR UPDATE SKIP LOCKED
+    )
+    RETURNING match_id, user_1_id, user_2_id;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (uni_id,))
+                expired = cur.fetchall()
+                conn.commit()
+                return expired
+    except Exception as e:
+        print(f"ERROR in expire_interest_matches: {e}")
+        return []
+
+
+def get_interest_match_by_id(match_id: int, uni_id: int) -> dict | None:
+    """Получает interest_match по ID."""
+    sql = """
+    SELECT
+        im.match_id,
+        im.user_1_id,
+        im.user_2_id,
+        im.similarity_score,
+        im.status,
+        im.proposed_shop_id,
+        im.proposed_meet_time,
+        im.proposed_by,
+        im.negotiation_round,
+        im.coffee_request_id,
+        u1.first_name as user_1_name,
+        u2.first_name as user_2_name,
+        s.name as shop_name
+    FROM interest_matches im
+    JOIN users u1 ON im.user_1_id = u1.user_id
+    JOIN users u2 ON im.user_2_id = u2.user_id
+    LEFT JOIN coffee_shops s ON im.proposed_shop_id = s.shop_id
+    WHERE im.match_id = %s AND im.university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(sql, (match_id, uni_id))
+                result = cur.fetchone()
+                return dict(result) if result else None
+    except Exception as e:
+        print(f"ERROR in get_interest_match_by_id: {e}")
+        return None
+
+
+def has_user_bio(user_id: int, uni_id: int) -> bool:
+    """Проверяет, заполнено ли у пользователя поле bio."""
+    sql = """
+    SELECT bio FROM users
+    WHERE user_id = %s AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id, uni_id))
+                result = cur.fetchone()
+                return bool(result and result[0] and result[0].strip())
+    except Exception as e:
+        print(f"ERROR in has_user_bio: {e}")
+        return False
+
+
 def main():
     pass
 

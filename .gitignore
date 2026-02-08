@@ -38,3 +38,6 @@ postgres_data/
 .vscode/
 .idea/
 *.swp
+
+# Claude Code
+.claude/

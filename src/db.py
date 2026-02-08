@@ -183,25 +183,33 @@ def get_pending_requests(user_id: int, uni_id: int) -> list:
         s.name,
         s.promo_label,
         r.meet_time,
-        u.coffee_streak
+        u.coffee_streak,
+        CASE
+            WHEN u.embedding IS NOT NULL AND viewer.embedding IS NOT NULL
+            THEN GREATEST(0, ROUND((1 - (u.embedding <=> viewer.embedding))::numeric * 100))
+            ELSE NULL
+        END as similarity_percent
     FROM
         coffee_requests AS r
     JOIN
         coffee_shops AS s ON r.shop_id = s.shop_id
     JOIN
         users AS u ON r.creator_user_id = u.user_id
+    LEFT JOIN
+        users AS viewer ON viewer.user_id = %s AND viewer.university_id = %s
     WHERE
         r.status = 'pending'
         AND r.creator_user_id != %s
         AND r.meet_time > NOW()
         AND r.university_id = %s
     ORDER BY
+        similarity_percent DESC NULLS LAST,
         r.meet_time ASC;
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (user_id, uni_id))
+                cur.execute(sql, (user_id, uni_id, user_id, uni_id))
                 return cur.fetchall()
     except Exception as e:
         print(f"ERROR in get_pending_requests(): {e}")

@@ -681,7 +681,7 @@ async def view_available_requests(
         return CHOOSING_ACTION
 
     buttons = []
-    for request_id, shop_name, promo_label, meet_time, streak in requests:
+    for request_id, shop_name, promo_label, meet_time, streak, similarity in requests:
         meet_time_moscow = meet_time.astimezone(MOSCOW_TIMEZONE)
         date_time_str = meet_time_moscow.strftime("%d.%m %H:%M")
 
@@ -689,8 +689,14 @@ async def view_available_requests(
         if promo_label:
             shop_display += f" {promo_label}"
 
+        prefix = ""
+        if similarity is not None:
+            prefix += f"⭐{int(similarity)}% "
         if streak >= 1:
-            button_text = f"🔥{streak} | 📍{shop_display} • {date_time_str}"
+            prefix += f"🔥{streak} "
+
+        if prefix:
+            button_text = f"{prefix}| 📍{shop_display} • {date_time_str}"
         else:
             button_text = f"📍{shop_display} • {date_time_str}"
 

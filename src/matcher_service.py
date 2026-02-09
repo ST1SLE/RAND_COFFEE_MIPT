@@ -12,7 +12,7 @@ import argparse
 import json
 import schedule
 from dotenv import load_dotenv
-from src.db import init_db_pool
+from src.db import init_db_pool, count_searching_users_without_embeddings
 from src.matcher import execute_interest_matching
 
 load_dotenv()
@@ -35,6 +35,30 @@ def load_config(path: str):
         return json.load(f)
 
 
+def _wait_for_embeddings(uni_id: int, max_retries: int = 2, wait_seconds: int = 90):
+    """
+    Проверяет, есть ли пользователи в режиме поиска без эмбеддингов.
+    Если есть — ждёт, пока worker их обработает (worker запускается каждые 60с).
+    """
+    for attempt in range(max_retries):
+        missing = count_searching_users_without_embeddings(uni_id)
+        if missing == 0:
+            logger.info("All searching users have embeddings.")
+            return
+        logger.warning(
+            f"{missing} searching user(s) lack embeddings. "
+            f"Waiting {wait_seconds}s for worker (attempt {attempt + 1}/{max_retries})..."
+        )
+        time.sleep(wait_seconds)
+
+    remaining = count_searching_users_without_embeddings(uni_id)
+    if remaining > 0:
+        logger.warning(
+            f"Still {remaining} user(s) without embeddings after retries. "
+            f"Proceeding — they will be excluded from matching."
+        )
+
+
 def run_interest_matching_job():
     """
     Ежедневный мэтчинг по интересам.
@@ -46,6 +70,8 @@ def run_interest_matching_job():
         return
 
     try:
+        _wait_for_embeddings(uni_id)
+
         logger.info(f"🔍 Starting interest matching job for university_id={uni_id}")
         matched_count = execute_interest_matching(uni_id)
 

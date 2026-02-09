@@ -1103,6 +1103,34 @@ def get_user_meeting_history(user_id: int, uni_id: int):
         return set()
 
 
+def get_interest_match_history(user_id: int, uni_id: int, cooldown_days: int = 30) -> set:
+    """
+    Возвращает user_id, с которыми пользователь уже имел interest_match
+    (любой статус) в пределах cooldown-периода.
+    После cooldown_days пара может быть замэтчена повторно.
+    """
+    sql = """
+        SELECT DISTINCT
+            CASE
+                WHEN user_1_id = %s THEN user_2_id
+                ELSE user_1_id
+            END as partner_id
+        FROM interest_matches
+        WHERE (user_1_id = %s OR user_2_id = %s)
+          AND university_id = %s
+          AND created_at > NOW() - make_interval(days => %s);
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id, user_id, user_id, uni_id, cooldown_days))
+                results = cur.fetchall()
+                return {row[0] for row in results if row[0] is not None}
+    except Exception as e:
+        print(f"ERROR in get_interest_match_history: {e}")
+        return set()
+
+
 def get_new_matches_for_notification(uni_id: int):
     """
     Получает matched заявки, для которых еще не было отправлено уведомление.
@@ -1195,6 +1223,28 @@ def get_interest_search_count(uni_id: int) -> int:
         return 0
 
 
+def count_searching_users_without_embeddings(uni_id: int) -> int:
+    """Количество пользователей в режиме поиска, у которых ещё нет эмбеддинга."""
+    sql = """
+    SELECT COUNT(*)
+    FROM users
+    WHERE is_searching_interest_match = TRUE
+      AND university_id = %s
+      AND bio IS NOT NULL
+      AND bio != ''
+      AND embedding IS NULL;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (uni_id,))
+                result = cur.fetchone()
+                return result[0] if result else 0
+    except Exception as e:
+        print(f"ERROR in count_searching_users_without_embeddings: {e}")
+        return 0
+
+
 def get_interest_search_users(uni_id: int) -> list:
     """
     Возвращает пользователей в режиме поиска с готовыми эмбеддингами.
@@ -1221,7 +1271,14 @@ def create_interest_match(user_1: int, user_2: int, similarity: float, uni_id: i
     """
     Создает interest_match и снимает is_searching у обоих пользователей.
     Атомарная операция в одной транзакции.
-    Returns: match_id или None при ошибке.
+    Проверяет, что ни у одного из пользователей нет активного мэтча.
+    Returns: match_id или None при ошибке/пропуске.
+    """
+    check_sql = """
+    SELECT COUNT(*) FROM interest_matches
+    WHERE status IN ('proposed', 'negotiating')
+      AND university_id = %s
+      AND (user_1_id IN (%s, %s) OR user_2_id IN (%s, %s));
     """
     insert_sql = """
     INSERT INTO interest_matches (user_1_id, user_2_id, similarity_score, university_id)
@@ -1236,6 +1293,10 @@ def create_interest_match(user_1: int, user_2: int, similarity: float, uni_id: i
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
+                cur.execute(check_sql, (uni_id, user_1, user_2, user_1, user_2))
+                if cur.fetchone()[0] > 0:
+                    print(f"Skipping: user {user_1} or {user_2} already has active interest_match")
+                    return None
                 cur.execute(insert_sql, (user_1, user_2, similarity, uni_id))
                 match_id = cur.fetchone()[0]
                 cur.execute(reset_sql, (user_1, user_2, uni_id))
@@ -1266,6 +1327,8 @@ def get_pending_interest_match(user_id: int, uni_id: int) -> dict | None:
         im.updated_at,
         u1.first_name as user_1_name,
         u2.first_name as user_2_name,
+        u1.bio as user_1_bio,
+        u2.bio as user_2_bio,
         s.name as shop_name
     FROM interest_matches im
     JOIN users u1 ON im.user_1_id = u1.user_id
@@ -1310,7 +1373,9 @@ def get_new_interest_matches_for_notification(uni_id: int) -> list:
         user_2_id,
         similarity_score,
         (SELECT first_name FROM users WHERE user_id = user_1_id) as user_1_name,
-        (SELECT first_name FROM users WHERE user_id = user_2_id) as user_2_name;
+        (SELECT first_name FROM users WHERE user_id = user_2_id) as user_2_name,
+        (SELECT bio FROM users WHERE user_id = user_1_id) as user_1_bio,
+        (SELECT bio FROM users WHERE user_id = user_2_id) as user_2_bio;
     """
     try:
         with get_db_connection() as conn:
@@ -1488,6 +1553,56 @@ def expire_interest_matches(uni_id: int) -> list:
         return []
 
 
+def get_stale_interest_proposals(uni_id: int) -> list:
+    """
+    Находит negotiating interest_matches, где партнер не ответил >6 часов
+    и напоминание ещё не отправлено.
+    """
+    sql = """
+    SELECT
+        im.match_id,
+        im.user_1_id,
+        im.user_2_id,
+        im.proposed_by,
+        im.proposed_meet_time,
+        s.name as shop_name
+    FROM interest_matches im
+    LEFT JOIN coffee_shops s ON im.proposed_shop_id = s.shop_id
+    WHERE im.status = 'negotiating'
+      AND im.university_id = %s
+      AND im.updated_at < NOW() - INTERVAL '6 hours'
+      AND im.is_proposal_reminder_sent = FALSE
+      AND im.proposed_by IS NOT NULL;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.DictCursor) as cur:
+                cur.execute(sql, (uni_id,))
+                return cur.fetchall()
+    except Exception as e:
+        print(f"ERROR in get_stale_interest_proposals: {e}")
+        return []
+
+
+def mark_proposal_reminder_sent(match_id: int, uni_id: int) -> bool:
+    """Помечает, что напоминание о предложении было отправлено."""
+    sql = """
+    UPDATE interest_matches
+    SET is_proposal_reminder_sent = TRUE
+    WHERE match_id = %s AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (match_id, uni_id))
+                success = cur.rowcount == 1
+                conn.commit()
+                return success
+    except Exception as e:
+        print(f"ERROR in mark_proposal_reminder_sent: {e}")
+        return False
+
+
 def get_interest_match_by_id(match_id: int, uni_id: int) -> dict | None:
     """Получает interest_match по ID."""
     sql = """
@@ -1504,6 +1619,8 @@ def get_interest_match_by_id(match_id: int, uni_id: int) -> dict | None:
         im.coffee_request_id,
         u1.first_name as user_1_name,
         u2.first_name as user_2_name,
+        u1.bio as user_1_bio,
+        u2.bio as user_2_bio,
         s.name as shop_name
     FROM interest_matches im
     JOIN users u1 ON im.user_1_id = u1.user_id

@@ -11,6 +11,7 @@ import logging
 from src.db import (
     get_pending_requests_for_matching,
     get_user_meeting_history,
+    get_interest_match_history,
     pair_user_for_request,
     get_interest_search_users,
     create_interest_match,
@@ -226,10 +227,12 @@ def execute_interest_matching(uni_id: int) -> int:
     user_ids = [u[0] for u in users]
     embeddings = [parse_pgvector_string(u[1]) for u in users]
 
-    # Предзагружаем историю встреч
+    # Предзагружаем историю встреч (coffee_requests + interest_matches)
     meeting_histories = {}
     for uid in user_ids:
-        meeting_histories[uid] = get_user_meeting_history(uid, uni_id)
+        coffee_history = get_user_meeting_history(uid, uni_id)
+        interest_history = get_interest_match_history(uid, uni_id, cooldown_days=30)
+        meeting_histories[uid] = coffee_history | interest_history
 
     # Вычисляем матрицу сходства и формируем кандидатов
     candidate_pairs = []

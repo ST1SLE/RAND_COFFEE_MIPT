@@ -73,6 +73,8 @@ from db import (
     accept_meeting_proposal,
     decline_interest_match,
     expire_interest_matches,
+    get_stale_interest_proposals,
+    mark_proposal_reminder_sent,
 )
 
 load_dotenv()
@@ -105,6 +107,16 @@ logger = logging.getLogger(__name__)
 ) = range(16)
 
 MAX_NEGOTIATION_ROUNDS = 5
+
+
+def _get_next_matching_time_str() -> str:
+    """Вычисляет, когда будет следующий мэтчинг (12:00 МСК)."""
+    now_moscow = datetime.now(MOSCOW_TIMEZONE)
+    matching_today = now_moscow.replace(hour=12, minute=0, second=0, microsecond=0)
+    if now_moscow < matching_today:
+        return "Следующий мэтчинг: сегодня в 12:00"
+    return "Следующий мэтчинг: завтра в 12:00"
+
 
 STATUS_CONFIG = {
     "pending": {
@@ -368,6 +380,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "«☕️ *Найти компанию*» — здесь можно посмотреть, кто уже ищет компанию, или создать свою заявку на кофе-мит.\n"
         "«В заявке ты выбираешь место встречи, дату и время.\n\n"
         "«📂 *Мои заявки*» — тут хранятся все твои кофейные планы. Можно отменить заявку, если планы поменялись.\n\n"
+        "«🔍 *Мэтчинг по интересам*» — включи режим поиска, и раз в день я подберу тебе собеседника "
+        "на основе ваших интересов. Вы договоритесь о месте и времени прямо в боте.\n\n"
         "Всё просто! Если что-то пошло не так, команда /cancel всегда прервет любое действие."
     )
     await update.message.reply_text(
@@ -395,6 +409,7 @@ async def post_init(app):
     app.job_queue.run_repeating(auto_cancel_job, interval=300, first=40)
     # Мэтчинг по интересам
     app.job_queue.run_repeating(notify_interest_matches_job, interval=120, first=35)
+    app.job_queue.run_repeating(remind_interest_proposals_job, interval=1800, first=120)
     app.job_queue.run_repeating(expire_interest_matches_job, interval=1800, first=90)
 
 
@@ -1888,7 +1903,7 @@ async def interest_match_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
         text = (
             "✅ Вы в режиме мэтчинга по интересам.\n\n"
             f"Участников в пуле: {pool_count}\n"
-            "Следующий мэтчинг: ~завтра\n\n"
+            f"{_get_next_matching_time_str()}\n\n"
             "Вы по-прежнему можете создавать заявки и откликаться на чужие в обычном режиме."
         )
         keyboard = [
@@ -1930,19 +1945,20 @@ async def _show_interest_match_status(
 ) -> int:
     """Показывает статус активного interest_match в меню."""
     user_id = update.effective_user.id
-    partner_name = match["user_2_name"] if match["user_1_id"] == user_id else match["user_1_name"]
+    partner_bio = match["user_2_bio"] if match["user_1_id"] == user_id else match["user_1_bio"]
+    bio_excerpt = (partner_bio[:150] + "...") if partner_bio and len(partner_bio) > 150 else (partner_bio or "Не указано")
     similarity_pct = max(0, round(match["similarity_score"] * 100))
 
     if match["status"] == "proposed":
         text = (
             f"🎯 У вас есть мэтч по интересам!\n\n"
-            f"👤 Партнер: {partner_name}\n"
+            f"📝 О партнере: {bio_excerpt}\n"
             f"📊 Совместимость: {similarity_pct}%\n\n"
             f"Чтобы встреча состоялась, нужно договориться о месте и времени."
         )
         keyboard = [
             [InlineKeyboardButton("☕ Предложить встречу", callback_data=f"interest_propose_{match['match_id']}")],
-            [InlineKeyboardButton("❌ Отклонить", callback_data=f"interest_decline_{match['match_id']}")],
+            [InlineKeyboardButton("❌ Отклонить мэтч", callback_data=f"interest_decline_{match['match_id']}")],
             [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],
         ]
     else:  # negotiating
@@ -1950,7 +1966,8 @@ async def _show_interest_match_status(
         if match["proposed_by"] == user_id:
             meet_time_moscow = match["proposed_meet_time"].astimezone(MOSCOW_TIMEZONE)
             text = (
-                f"⏳ Ожидание ответа от {partner_name}\n\n"
+                f"⏳ Ожидание ответа партнера\n\n"
+                f"📝 О партнере: {bio_excerpt}\n"
                 f"Ваше предложение:\n"
                 f"📍 {match['shop_name']}\n"
                 f"📅 {meet_time_moscow.strftime('%d.%m')} в {meet_time_moscow.strftime('%H:%M')}\n"
@@ -1964,7 +1981,8 @@ async def _show_interest_match_status(
         else:
             meet_time_moscow = match["proposed_meet_time"].astimezone(MOSCOW_TIMEZONE)
             text = (
-                f"☕ Предложение встречи от {partner_name}!\n\n"
+                f"☕ Предложение встречи!\n\n"
+                f"📝 О партнере: {bio_excerpt}\n"
                 f"📍 Кофейня: {match['shop_name']}\n"
                 f"📅 Дата: {meet_time_moscow.strftime('%d.%m')}\n"
                 f"🕐 Время: {meet_time_moscow.strftime('%H:%M')}\n"
@@ -1974,7 +1992,7 @@ async def _show_interest_match_status(
             keyboard = [
                 [InlineKeyboardButton("✅ Принять", callback_data=f"proposal_accept_{match['match_id']}")],
                 [InlineKeyboardButton("🔄 Предложить другое", callback_data=f"proposal_counter_{match['match_id']}")],
-                [InlineKeyboardButton("❌ Отклонить", callback_data=f"proposal_decline_{match['match_id']}")],
+                [InlineKeyboardButton("❌ Отклонить мэтч", callback_data=f"proposal_decline_{match['match_id']}")],
                 [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],
             ]
 
@@ -2047,7 +2065,26 @@ async def interest_propose_start(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
 
     if match["negotiation_round"] >= MAX_NEGOTIATION_ROUNDS:
-        await query.edit_message_text("Достигнут лимит попыток согласования.")
+        # Если есть предложение от другой стороны — показать Accept/Decline
+        if match["status"] == "negotiating" and match["proposed_by"] != user_id:
+            meet_time_moscow = match["proposed_meet_time"].astimezone(MOSCOW_TIMEZONE)
+            text = (
+                f"Достигнут лимит попыток согласования.\n\n"
+                f"Вы можете принять текущее предложение партнера:\n"
+                f"📍 {match['shop_name']}\n"
+                f"📅 {meet_time_moscow.strftime('%d.%m')} в {meet_time_moscow.strftime('%H:%M')}\n\n"
+                f"Или отклонить мэтч."
+            )
+            keyboard = [
+                [InlineKeyboardButton("✅ Принять", callback_data=f"proposal_accept_{match_id}")],
+                [InlineKeyboardButton("❌ Отклонить мэтч", callback_data=f"proposal_decline_{match_id}")],
+            ]
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await query.edit_message_text(
+                "Достигнут лимит попыток согласования. "
+                "Мэтч будет автоматически отменен."
+            )
         return ConversationHandler.END
 
     context.user_data["interest_match_id"] = match_id
@@ -2198,14 +2235,17 @@ async def interest_propose_time(
     match = get_interest_match_by_id(match_id, uni_id)
     if match:
         partner_id = match["user_2_id"] if match["user_1_id"] == user_id else match["user_1_id"]
-        proposer_name = match["user_1_name"] if match["user_1_id"] == user_id else match["user_2_name"]
+        proposer_bio = match["user_1_bio"] if match["user_1_id"] == user_id else match["user_2_bio"]
+        proposer_bio = proposer_bio or "Не указано"
+        bio_excerpt = (proposer_bio[:150] + "...") if len(proposer_bio) > 150 else proposer_bio
         similarity_pct = max(0, round(match["similarity_score"] * 100))
         rounds_left = MAX_NEGOTIATION_ROUNDS - match["negotiation_round"]
 
         meet_time_moscow = meet_time.astimezone(MOSCOW_TIMEZONE)
 
         proposal_text = (
-            f"☕ Предложение встречи от {proposer_name}!\n\n"
+            f"☕ Предложение встречи!\n\n"
+            f"📝 О партнере: {bio_excerpt}\n"
             f"📍 Кофейня: {match['shop_name']}\n"
             f"📅 Дата: {meet_time_moscow.strftime('%d.%m')}\n"
             f"🕐 Время: {meet_time_moscow.strftime('%H:%M')}\n"
@@ -2216,7 +2256,7 @@ async def interest_propose_time(
         keyboard = [
             [InlineKeyboardButton("✅ Принять", callback_data=f"proposal_accept_{match_id}")],
             [InlineKeyboardButton("🔄 Предложить другое", callback_data=f"proposal_counter_{match_id}")],
-            [InlineKeyboardButton("❌ Отклонить", callback_data=f"proposal_decline_{match_id}")],
+            [InlineKeyboardButton("❌ Отклонить мэтч", callback_data=f"proposal_decline_{match_id}")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -2317,19 +2357,22 @@ async def notify_interest_matches_job(context: ContextTypes.DEFAULT_TYPE):
         user_1_id = match["user_1_id"]
         user_2_id = match["user_2_id"]
         similarity_pct = max(0, round(match["similarity_score"] * 100))
-        user_1_name = match["user_1_name"]
-        user_2_name = match["user_2_name"]
+
+        user_1_bio = match.get("user_1_bio") or "Не указано"
+        user_2_bio = match.get("user_2_bio") or "Не указано"
+        bio_1_excerpt = (user_1_bio[:150] + "...") if len(user_1_bio) > 150 else user_1_bio
+        bio_2_excerpt = (user_2_bio[:150] + "...") if len(user_2_bio) > 150 else user_2_bio
 
         keyboard = [
             [InlineKeyboardButton("☕ Предложить встречу", callback_data=f"interest_propose_{match_id}")],
-            [InlineKeyboardButton("❌ Отклонить", callback_data=f"interest_decline_{match_id}")],
+            [InlineKeyboardButton("❌ Отклонить мэтч", callback_data=f"interest_decline_{match_id}")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         text_1 = (
             f"🎯 Мэтчинг по интересам!\n\n"
             f"Мы нашли для вас собеседника с похожими интересами!\n\n"
-            f"👤 Партнер: {user_2_name}\n"
+            f"📝 О партнере: {bio_2_excerpt}\n"
             f"📊 Совместимость: {similarity_pct}%\n\n"
             f"Чтобы встреча состоялась, нужно договориться о месте и времени.\n"
             f"Один из вас предложит детали встречи, а другой подтвердит."
@@ -2338,7 +2381,7 @@ async def notify_interest_matches_job(context: ContextTypes.DEFAULT_TYPE):
         text_2 = (
             f"🎯 Мэтчинг по интересам!\n\n"
             f"Мы нашли для вас собеседника с похожими интересами!\n\n"
-            f"👤 Партнер: {user_1_name}\n"
+            f"📝 О партнере: {bio_1_excerpt}\n"
             f"📊 Совместимость: {similarity_pct}%\n\n"
             f"Чтобы встреча состоялась, нужно договориться о месте и времени.\n"
             f"Один из вас предложит детали встречи, а другой подтвердит."
@@ -2350,6 +2393,53 @@ async def notify_interest_matches_job(context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"Sent interest match notification for match_id: {match_id}")
         except Exception as e:
             logger.error(f"Failed to send interest match notification for match_id {match_id}: {e}")
+
+
+async def remind_interest_proposals_job(context: ContextTypes.DEFAULT_TYPE):
+    """Джоб: напоминание партнеру, который не ответил на предложение встречи (>6 часов)."""
+    logger.info("JOB: checking for stale interest proposals to remind...")
+    uni_id = BOT_CONFIG["university_id"]
+    stale = get_stale_interest_proposals(uni_id)
+    if not stale:
+        return
+
+    logger.info(f"Found {len(stale)} stale proposals to send reminders.")
+
+    for row in stale:
+        match_id = row["match_id"]
+        user_1_id = row["user_1_id"]
+        user_2_id = row["user_2_id"]
+        proposed_by = row["proposed_by"]
+        shop_name = row["shop_name"]
+        meet_time = row["proposed_meet_time"]
+
+        # Партнер, который должен ответить — тот, кто НЕ предложил
+        recipient_id = user_2_id if proposed_by == user_1_id else user_1_id
+
+        meet_time_moscow = meet_time.astimezone(MOSCOW_TIMEZONE)
+
+        text = (
+            f"⏰ Напоминание: вам предложили встречу "
+            f"в «{shop_name}» ({meet_time_moscow.strftime('%d.%m')} "
+            f"в {meet_time_moscow.strftime('%H:%M')}).\n\n"
+            f"Партнер ждет вашего ответа."
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("✅ Принять", callback_data=f"proposal_accept_{match_id}")],
+            [InlineKeyboardButton("🔄 Предложить другое", callback_data=f"proposal_counter_{match_id}")],
+            [InlineKeyboardButton("❌ Отклонить мэтч", callback_data=f"proposal_decline_{match_id}")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        try:
+            await context.bot.send_message(
+                chat_id=recipient_id, text=text, reply_markup=reply_markup
+            )
+            mark_proposal_reminder_sent(match_id, uni_id)
+            logger.info(f"Sent proposal reminder for match_id={match_id} to user {recipient_id}")
+        except Exception as e:
+            logger.error(f"Failed to send proposal reminder for match_id {match_id}: {e}")
 
 
 async def expire_interest_matches_job(context: ContextTypes.DEFAULT_TYPE):
@@ -2364,13 +2454,51 @@ async def expire_interest_matches_job(context: ContextTypes.DEFAULT_TYPE):
     for match_id, user_1_id, user_2_id in expired:
         text = (
             "⏰ Время на согласование встречи истекло.\n\n"
-            "Вы можете вернуться в режим поиска по интересам в любой момент."
+            "Вы можете вернуться в режим поиска по интересам."
         )
+        keyboard = [
+            [InlineKeyboardButton("🔍 Вернуться в поиск", callback_data="interest_reenter")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         try:
-            await context.bot.send_message(chat_id=user_1_id, text=text)
-            await context.bot.send_message(chat_id=user_2_id, text=text)
+            await context.bot.send_message(chat_id=user_1_id, text=text, reply_markup=reply_markup)
+            await context.bot.send_message(chat_id=user_2_id, text=text, reply_markup=reply_markup)
         except Exception as e:
             logger.error(f"Failed to notify about expired interest match {match_id}: {e}")
+
+
+async def handle_interest_reenter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Повторный вход в режим поиска по интересам (из кнопки после экспирации/отклонения)."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = update.effective_user.id
+    uni_id = BOT_CONFIG["university_id"]
+
+    if not has_user_bio(user_id, uni_id):
+        await query.edit_message_text(
+            "Для участия в мэтчинге по интересам нужно заполнить раздел «О себе» в профиле.\n\n"
+            "Перейдите в «👤 Мой профиль» и добавьте информацию о себе."
+        )
+        return
+
+    # Проверяем, нет ли уже активного мэтча
+    active_match = get_pending_interest_match(user_id, uni_id)
+    if active_match:
+        await query.edit_message_text(
+            "У вас уже есть активный мэтч по интересам. "
+            "Откройте «🔍 Мэтчинг по интересам» для подробностей."
+        )
+        return
+
+    set_interest_search(user_id, uni_id, True)
+    pool_count = get_interest_search_count(uni_id)
+
+    await query.edit_message_text(
+        f"✅ Вы снова в режиме поиска!\n\n"
+        f"Участников в пуле: {pool_count}\n"
+        f"{_get_next_matching_time_str()}"
+    )
 
 
 def load_config(path):
@@ -2628,6 +2756,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_interest_decline, pattern="^interest_decline_"))
     app.add_handler(CallbackQueryHandler(handle_proposal_accept, pattern="^proposal_accept_"))
     app.add_handler(CallbackQueryHandler(handle_proposal_decline, pattern="^proposal_decline_"))
+    app.add_handler(CallbackQueryHandler(handle_interest_reenter, pattern="^interest_reenter$"))
 
     feedback_filter = filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER
     app.add_handler(MessageHandler(feedback_filter, process_feedback_text))

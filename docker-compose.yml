@@ -15,6 +15,7 @@ services:
       - ./schema.sql:/docker-entrypoint-initdb.d/1_schema.sql
       - ./migrations/001_enable_vector.sql:/docker-entrypoint-initdb.d/2_vector_migration.sql
       - ./migrations/003_add_interest_matching.sql:/docker-entrypoint-initdb.d/3_interest_matching.sql
+      - ./migrations/004_interest_match_reminders.sql:/docker-entrypoint-initdb.d/4_interest_match_reminders.sql
 
   bot:
     build: .

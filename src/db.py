@@ -1,4 +1,5 @@
 import os
+import time
 import psycopg2
 import psycopg2.extras
 from psycopg2 import pool
@@ -12,22 +13,29 @@ load_dotenv()
 DB_POOL = None
 
 
-def init_db_pool():
+def init_db_pool(max_retries=10, retry_delay=3):
     global DB_POOL
-    try:
-        DB_POOL = pool.SimpleConnectionPool(
-            minconn=1,
-            maxconn=10,
-            host=os.getenv("DB_HOST"),
-            database=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASS"),
-            port=os.getenv("DB_PORT"),
-        )
-        print("Database connection pool created successfully.")
-    except Exception as e:
-        print(f"Error creating connection pool: {e}")
-        raise
+    for attempt in range(1, max_retries + 1):
+        try:
+            DB_POOL = pool.SimpleConnectionPool(
+                minconn=1,
+                maxconn=10,
+                host=os.getenv("DB_HOST"),
+                database=os.getenv("DB_NAME"),
+                user=os.getenv("DB_USER"),
+                password=os.getenv("DB_PASS"),
+                port=os.getenv("DB_PORT"),
+            )
+            print("Database connection pool created successfully.")
+            return
+        except psycopg2.OperationalError as e:
+            if attempt < max_retries:
+                print(f"DB not ready (attempt {attempt}/{max_retries}): {e}")
+                print(f"Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+            else:
+                print(f"Failed to connect to DB after {max_retries} attempts.")
+                raise
 
 
 @contextmanager

@@ -2510,25 +2510,14 @@ async def back_to_main_menu_from_anywhere(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     """
-    Универсальный прерыватель. Завершает текущий сценарий и запускает новый
-    в зависимости от того, какая кнопка меню была нажата.
+    Универсальный прерыватель. Завершает текущий сценарий и показывает главное меню.
+
+    ВАЖНО: нельзя вызывать handler-функции из ДРУГОГО ConversationHandler —
+    возвращённое ими состояние (напр. CHOOSING_ACTION=0) будет сохранено
+    в текущем ConversationHandler, где такого состояния нет, и пользователь
+    «застрянет» — все его callback'и будут перехвачены, но не обработаны.
     """
-    text = update.message.text
-
-    # Завершаем текущий ConversationHandler
-    # Библиотека сама подхватит новое сообщение следующим подходящим хендлером
-    if text == "☕️ Найти компанию":
-        return await find_company_start(update, context)
-    elif text == "📂 Мои заявки":
-        return await my_requests_start(update, context)
-    elif text == "👤 Мой профиль":
-        return await my_profile_start(update, context)
-    elif text == "🔍 Мэтчинг по интересам":
-        return await interest_match_menu(update, context)
-    elif text == "ℹ️ Гайд":
-        await help_command(update, context)
-        return ConversationHandler.END
-
+    await show_main_menu_keyboard(update, context, "Главное меню:")
     return ConversationHandler.END
 
 

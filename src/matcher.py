@@ -236,23 +236,32 @@ def execute_interest_matching(uni_id: int) -> int:
 
     # Вычисляем матрицу сходства и формируем кандидатов
     candidate_pairs = []
+    skipped_by_threshold = 0
+    skipped_by_history = 0
     for i in range(n):
         for j in range(i + 1, n):
             sim = cosine_similarity(embeddings[i], embeddings[j])
 
             # Порог совместимости
             if sim < INTEREST_SIMILARITY_THRESHOLD:
+                logger.info(f"Пара ({user_ids[i]}, {user_ids[j]}): similarity={sim:.3f} < порог {INTEREST_SIMILARITY_THRESHOLD}")
+                skipped_by_threshold += 1
                 continue
 
             # Проверяем историю встреч
             if user_ids[j] in meeting_histories.get(user_ids[i], set()):
-                logger.debug(f"Пропускаем ({user_ids[i]}, {user_ids[j]}) — уже встречались.")
+                logger.info(f"Пропускаем ({user_ids[i]}, {user_ids[j]}): similarity={sim:.3f}, но уже встречались (cooldown 30д).")
+                skipped_by_history += 1
                 continue
 
             candidate_pairs.append((i, j, sim))
 
     if not candidate_pairs:
-        logger.info("Не найдено подходящих пар выше порога совместимости.")
+        logger.info(
+            f"Не найдено подходящих пар. "
+            f"Всего пар: {n*(n-1)//2}, отсеяно по порогу: {skipped_by_threshold}, "
+            f"отсеяно по истории: {skipped_by_history}."
+        )
         return 0
 
     # Сортируем по убыванию сходства

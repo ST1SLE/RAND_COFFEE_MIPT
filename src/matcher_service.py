@@ -3,9 +3,12 @@
 Сервис мэтчинга по интересам.
 
 Запускается как отдельный контейнер в docker-compose.
-Раз в день подбирает пары среди пользователей в режиме поиска
+Периодически подбирает пары среди пользователей в режиме поиска
 на основе косинусного сходства эмбеддингов.
+
+Интервал задаётся через переменную окружения MATCHING_INTERVAL_HOURS (по умолчанию 6).
 """
+import os
 import time
 import logging
 import argparse
@@ -25,8 +28,9 @@ logger = logging.getLogger(__name__)
 
 MATCHER_CONFIG = {}
 
-# Время ежедневного запуска мэтчинга (МСК)
-MATCHING_TIME = "12:00"
+# Интервал между запусками мэтчинга в часах.
+# Переопределяется через переменную окружения MATCHING_INTERVAL_HOURS.
+MATCHING_INTERVAL_HOURS = int(os.getenv("MATCHING_INTERVAL_HOURS", "6"))
 
 
 def load_config(path: str):
@@ -61,7 +65,7 @@ def _wait_for_embeddings(uni_id: int, max_retries: int = 2, wait_seconds: int = 
 
 def run_interest_matching_job():
     """
-    Ежедневный мэтчинг по интересам.
+    Периодический мэтчинг по интересам.
     Подбирает пары среди пользователей с is_searching_interest_match=TRUE.
     """
     uni_id = MATCHER_CONFIG.get("university_id")
@@ -95,10 +99,14 @@ def main():
 
     init_db_pool()
 
-    # Ежедневный запуск в MATCHING_TIME
-    schedule.every().day.at(MATCHING_TIME).do(run_interest_matching_job)
+    # Запуск каждые MATCHING_INTERVAL_HOURS часов
+    schedule.every(MATCHING_INTERVAL_HOURS).hours.do(run_interest_matching_job)
 
-    logger.info(f"🎯 Interest matching service is running. Matching daily at {MATCHING_TIME}.")
+    logger.info(
+        f"🎯 Interest matching service is running. "
+        f"Matching every {MATCHING_INTERVAL_HOURS}h "
+        f"(set MATCHING_INTERVAL_HOURS env var to change)."
+    )
 
     # Первый запуск сразу при старте
     run_interest_matching_job()

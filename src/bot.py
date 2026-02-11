@@ -15,6 +15,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
 )
+from telegram.error import NetworkError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -2521,12 +2522,9 @@ async def back_to_main_menu_from_anywhere(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     """
-    Универсальный прерыватель. Завершает текущий сценарий и показывает главное меню.
-
-    ВАЖНО: нельзя вызывать handler-функции из ДРУГОГО ConversationHandler —
-    возвращённое ими состояние (напр. CHOOSING_ACTION=0) будет сохранено
-    в текущем ConversationHandler, где такого состояния нет, и пользователь
-    «застрянет» — все его callback'и будут перехвачены, но не обработаны.
+    Fallback для кнопок меню, не являющихся entry_point'ами (сейчас только "ℹ️ Гайд").
+    Все остальные кнопки меню — entry_points с allow_reentry=True,
+    поэтому переключение между режимами происходит напрямую.
     """
     await show_main_menu_keyboard(update, context, "Главное меню:")
     return ConversationHandler.END
@@ -2596,13 +2594,25 @@ def main():
         allow_reentry=True,
     )
 
-    # 3. Сценарий поиска кофе и управления заявками
+    # 3. Единый ConversationHandler для всех режимов (кроме регистрации)
+    #
+    # Все entry_points в одном handler'e + allow_reentry=True означает,
+    # что нажатие любой кнопки меню НАПРЯМУЮ переключает режим
+    # без промежуточного "Главное меню:".
+    interest_match_handler = MessageHandler(
+        filters.Regex("^🔍 Мэтчинг по интересам$"), interest_match_menu
+    )
     conv_handler = ConversationHandler(
         entry_points=[
             find_handler,
             my_requests_handler,
+            my_profile_handler,
+            interest_match_handler,
+            CallbackQueryHandler(interest_propose_start, pattern="^interest_propose_"),
+            CallbackQueryHandler(interest_propose_start, pattern="^proposal_counter_"),
         ],
         states={
+            # --- Поиск кофе ---
             CHOOSING_ACTION: [
                 CallbackQueryHandler(
                     create_request_step1_shop, pattern="^create_new_request$"
@@ -2617,7 +2627,6 @@ def main():
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             CHOOSING_DATE: [
-                # Исключаем кнопки меню, чтобы не сохранять их как дату
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER,
                     create_request_step3_time,
@@ -2625,7 +2634,6 @@ def main():
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             CHOOSING_TIME: [
-                # Исключаем кнопки меню, чтобы не сохранять их как время
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER,
                     create_request_step4_validate,
@@ -2653,19 +2661,7 @@ def main():
                     handle_cancel_request_as_creator, pattern="^cancel_matched_"
                 ),
             ],
-        },
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            # Если нажали другую кнопку меню — закрываем этот сценарий
-            MessageHandler(MENU_BUTTONS_FILTER, back_to_main_menu_from_anywhere),
-        ],
-        allow_reentry=True,
-    )
-
-    # 4. Сценарий профиля
-    profile_conv = ConversationHandler(
-        entry_points=[my_profile_handler],
-        states={
+            # --- Профиль ---
             EDITING_PROFILE: [
                 CallbackQueryHandler(edit_bio_prompt, pattern="^edit_bio$"),
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
@@ -2676,26 +2672,7 @@ def main():
                     edit_bio_save,
                 )
             ],
-        },
-        fallbacks=[
-            CommandHandler("cancel", cancel),
-            # Если нажали «Найти компанию» или другую кнопку — закрываем профиль
-            MessageHandler(MENU_BUTTONS_FILTER, back_to_main_menu_from_anywhere),
-        ],
-        allow_reentry=True,
-    )
-
-    # 5. Сценарий мэтчинга по интересам
-    interest_match_handler = MessageHandler(
-        filters.Regex("^🔍 Мэтчинг по интересам$"), interest_match_menu
-    )
-    interest_conv = ConversationHandler(
-        entry_points=[
-            interest_match_handler,
-            CallbackQueryHandler(interest_propose_start, pattern="^interest_propose_"),
-            CallbackQueryHandler(interest_propose_start, pattern="^proposal_counter_"),
-        ],
-        states={
+            # --- Мэтчинг по интересам ---
             INTEREST_MATCH_MENU: [
                 CallbackQueryHandler(interest_match_enter, pattern="^interest_enter$"),
                 CallbackQueryHandler(interest_match_exit, pattern="^interest_exit$"),
@@ -2722,6 +2699,7 @@ def main():
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
+            # Ловит "ℹ️ Гайд" — единственную кнопку меню, не являющуюся entry_point
             MessageHandler(MENU_BUTTONS_FILTER, back_to_main_menu_from_anywhere),
         ],
         allow_reentry=True,
@@ -2729,8 +2707,6 @@ def main():
 
     # Добавляем в строгом порядке
     app.add_handler(registration_conv)
-    app.add_handler(profile_conv)  # Профиль выше основного поиска
-    app.add_handler(interest_conv)  # Мэтчинг по интересам
     app.add_handler(conv_handler)
 
     app.add_handler(CommandHandler("start", start))
@@ -2761,10 +2737,18 @@ def main():
     feedback_filter = filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER
     app.add_handler(MessageHandler(feedback_filter, process_feedback_text))
 
+    async def error_handler(_update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if isinstance(context.error, NetworkError):
+            logger.warning(f"Transient network error (PTB will retry): {context.error}")
+            return
+        logger.error(f"Unhandled exception: {context.error}", exc_info=context.error)
+
+    app.add_error_handler(error_handler)
+
     logger.info(
         "Starting the bot. Reference to bot: https://t.me/random_coffee_mipt_bot"
     )
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":

@@ -197,7 +197,7 @@ def execute_matching(uni_id: int):
     return success_count
 
 
-INTEREST_SIMILARITY_THRESHOLD = 0.5
+INTEREST_SIMILARITY_THRESHOLD = 0.15
 
 
 def execute_interest_matching(uni_id: int) -> int:

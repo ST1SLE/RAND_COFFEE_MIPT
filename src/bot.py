@@ -109,6 +109,17 @@ logger = logging.getLogger(__name__)
 MAX_NEGOTIATION_ROUNDS = 5
 
 
+def display_similarity(raw_score: float) -> int:
+    """
+    Конвертирует raw cosine similarity в user-facing процент.
+    Линейный remap из [0.15, 1.0] в [55, 95].
+
+    Примеры: 0.15 -> 55%, 0.30 -> 62%, 0.50 -> 72%, 0.70 -> 81%, 0.90 -> 91%
+    """
+    clamped = max(0.15, min(raw_score, 1.0))
+    return round(55 + (clamped - 0.15) * (95 - 55) / (1.0 - 0.15))
+
+
 def _get_next_matching_time_str() -> str:
     """Вычисляет, когда будет следующий мэтчинг (12:00 МСК)."""
     now_moscow = datetime.now(MOSCOW_TIMEZONE)
@@ -1947,7 +1958,7 @@ async def _show_interest_match_status(
     user_id = update.effective_user.id
     partner_bio = match["user_2_bio"] if match["user_1_id"] == user_id else match["user_1_bio"]
     bio_excerpt = (partner_bio[:150] + "...") if partner_bio and len(partner_bio) > 150 else (partner_bio or "Не указано")
-    similarity_pct = max(0, round(match["similarity_score"] * 100))
+    similarity_pct = display_similarity(match["similarity_score"])
 
     if match["status"] == "proposed":
         text = (
@@ -2238,7 +2249,7 @@ async def interest_propose_time(
         proposer_bio = match["user_1_bio"] if match["user_1_id"] == user_id else match["user_2_bio"]
         proposer_bio = proposer_bio or "Не указано"
         bio_excerpt = (proposer_bio[:150] + "...") if len(proposer_bio) > 150 else proposer_bio
-        similarity_pct = max(0, round(match["similarity_score"] * 100))
+        similarity_pct = display_similarity(match["similarity_score"])
         rounds_left = MAX_NEGOTIATION_ROUNDS - match["negotiation_round"]
 
         meet_time_moscow = meet_time.astimezone(MOSCOW_TIMEZONE)
@@ -2356,7 +2367,7 @@ async def notify_interest_matches_job(context: ContextTypes.DEFAULT_TYPE):
         match_id = match["match_id"]
         user_1_id = match["user_1_id"]
         user_2_id = match["user_2_id"]
-        similarity_pct = max(0, round(match["similarity_score"] * 100))
+        similarity_pct = display_similarity(match["similarity_score"])
 
         user_1_bio = match.get("user_1_bio") or "Не указано"
         user_2_bio = match.get("user_2_bio") or "Не указано"

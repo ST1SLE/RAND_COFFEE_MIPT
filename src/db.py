@@ -986,10 +986,10 @@ def get_users_without_embeddings(uni_id: int, limit: int = 30):
     Строгая фильтрация по university_id (SaaS-compliance).
 
     Returns:
-        list: [(user_id, bio), ...]
+        list: [(user_id, bio, phystech_school, year_as_student), ...]
     """
     sql = """
-        SELECT user_id, bio
+        SELECT user_id, bio, phystech_school, year_as_student
         FROM users
         WHERE university_id = %s
           AND bio IS NOT NULL

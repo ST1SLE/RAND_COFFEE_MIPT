@@ -67,13 +67,22 @@ def vectorize_users():
 
         logger.info(f"Found {len(users)} users without embeddings. Vectorizing...")
 
-        # Разбиваем на батчи для обработки
-        # (хотя get_users_without_embeddings уже возвращает ограниченное количество)
         user_ids = [u[0] for u in users]
-        bios = [u[1] for u in users]
+
+        # Обогащаем текст: факультет + курс + bio
+        # Это позволяет модели учитывать академический контекст при подборе пар
+        enriched_texts = []
+        for user_id, bio, school, year in users:
+            parts = []
+            if school and school != "Никакой из них":
+                parts.append(f"Факультет: {school}")
+            if year:
+                parts.append(f"Курс: {year}")
+            parts.append(f"О себе: {bio}")
+            enriched_texts.append(". ".join(parts))
 
         # Генерация эмбеддингов батчем (быстрее, чем по одному)
-        embeddings = MODEL.encode(bios, convert_to_numpy=True, show_progress_bar=False)
+        embeddings = MODEL.encode(enriched_texts, convert_to_numpy=True, show_progress_bar=False)
 
         # Сохраняем в БД
         success_count = 0

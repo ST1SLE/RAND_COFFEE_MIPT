@@ -7,8 +7,11 @@ from datetime import datetime, timezone
 from contextlib import contextmanager
 from dotenv import load_dotenv
 import json
+import logging
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 DB_POOL = None
 
@@ -1303,7 +1306,7 @@ def create_interest_match(user_1: int, user_2: int, similarity: float, uni_id: i
             with conn.cursor() as cur:
                 cur.execute(check_sql, (uni_id, user_1, user_2, user_1, user_2))
                 if cur.fetchone()[0] > 0:
-                    print(f"Skipping: user {user_1} or {user_2} already has active interest_match")
+                    logger.info(f"Skipping: user {user_1} or {user_2} already has active interest_match")
                     return None
                 cur.execute(insert_sql, (user_1, user_2, similarity, uni_id))
                 match_id = cur.fetchone()[0]
@@ -1311,7 +1314,7 @@ def create_interest_match(user_1: int, user_2: int, similarity: float, uni_id: i
                 conn.commit()
                 return match_id
     except Exception as e:
-        print(f"ERROR in create_interest_match: {e}")
+        logger.error(f"ERROR in create_interest_match({user_1}, {user_2}): {e}")
         return None
 
 

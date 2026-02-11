@@ -8,6 +8,7 @@
 """
 import numpy as np
 import logging
+from datetime import datetime, timezone, timedelta
 from src.db import (
     get_pending_requests_for_matching,
     get_user_meeting_history,
@@ -18,6 +19,23 @@ from src.db import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Valentine's Day: буст для кросс-гендерных пар (13-15 февраля 2026)
+MOSCOW_TZ = timezone(timedelta(hours=3))
+VALENTINE_START = datetime(2026, 2, 13, tzinfo=MOSCOW_TZ)
+VALENTINE_END = datetime(2026, 2, 16, tzinfo=MOSCOW_TZ)
+VALENTINE_CROSS_GENDER_BOOST = 0.25
+
+
+def is_valentine_period() -> bool:
+    """Проверяет, активен ли Valentine's Day режим."""
+    now = datetime.now(MOSCOW_TZ)
+    return VALENTINE_START <= now <= VALENTINE_END
+
+
+def _is_cross_gender(g1, g2) -> bool:
+    """Проверяет, что пара — кросс-гендерная (M-F или F-M)."""
+    return (g1 == "M" and g2 == "F") or (g1 == "F" and g2 == "M")
 
 
 def cosine_similarity(vec1, vec2):
@@ -226,6 +244,11 @@ def execute_interest_matching(uni_id: int) -> int:
 
     user_ids = [u[0] for u in users]
     embeddings = [parse_pgvector_string(u[1]) for u in users]
+    genders = [u[2] for u in users]  # 'M', 'F', 'skip', or None
+
+    valentine_mode = is_valentine_period()
+    if valentine_mode:
+        logger.info("💝 Valentine's Day режим активен! Кросс-гендерный буст +%.2f", VALENTINE_CROSS_GENDER_BOOST)
 
     # Предзагружаем историю встреч (coffee_requests + interest_matches)
     meeting_histories = {}
@@ -242,19 +265,28 @@ def execute_interest_matching(uni_id: int) -> int:
         for j in range(i + 1, n):
             sim = cosine_similarity(embeddings[i], embeddings[j])
 
+            # Valentine's буст для кросс-гендерных пар
+            effective_sim = sim
+            if valentine_mode and _is_cross_gender(genders[i], genders[j]):
+                effective_sim = min(sim + VALENTINE_CROSS_GENDER_BOOST, 1.0)
+                logger.info(
+                    f"💝 Пара ({user_ids[i]}, {user_ids[j]}): "
+                    f"sim={sim:.3f} + Valentine's буст → {effective_sim:.3f}"
+                )
+
             # Порог совместимости
-            if sim < INTEREST_SIMILARITY_THRESHOLD:
-                logger.info(f"Пара ({user_ids[i]}, {user_ids[j]}): similarity={sim:.3f} < порог {INTEREST_SIMILARITY_THRESHOLD}")
+            if effective_sim < INTEREST_SIMILARITY_THRESHOLD:
+                logger.info(f"Пара ({user_ids[i]}, {user_ids[j]}): similarity={effective_sim:.3f} < порог {INTEREST_SIMILARITY_THRESHOLD}")
                 skipped_by_threshold += 1
                 continue
 
             # Проверяем историю встреч
             if user_ids[j] in meeting_histories.get(user_ids[i], set()):
-                logger.info(f"Пропускаем ({user_ids[i]}, {user_ids[j]}): similarity={sim:.3f}, но уже встречались (cooldown 30д).")
+                logger.info(f"Пропускаем ({user_ids[i]}, {user_ids[j]}): similarity={effective_sim:.3f}, но уже встречались (cooldown 30д).")
                 skipped_by_history += 1
                 continue
 
-            candidate_pairs.append((i, j, sim))
+            candidate_pairs.append((i, j, effective_sim, sim))
 
     if not candidate_pairs:
         logger.info(
@@ -271,21 +303,23 @@ def execute_interest_matching(uni_id: int) -> int:
     used_indices = set()
     success_count = 0
 
-    for i, j, sim_score in candidate_pairs:
+    for i, j, effective_sim, raw_sim in candidate_pairs:
         if i in used_indices or j in used_indices:
             continue
 
         user_i = user_ids[i]
         user_j = user_ids[j]
 
-        match_id = create_interest_match(user_i, user_j, sim_score, uni_id)
+        # Сохраняем raw similarity (без Valentine's буста) для честной аналитики
+        match_id = create_interest_match(user_i, user_j, raw_sim, uni_id)
         if match_id:
             success_count += 1
             used_indices.add(i)
             used_indices.add(j)
             logger.info(
                 f"✅ Interest match #{match_id}: User {user_i} ↔ User {user_j}, "
-                f"Similarity: {sim_score:.3f}"
+                f"Similarity: {raw_sim:.3f}"
+                + (f" (effective: {effective_sim:.3f} 💝)" if effective_sim != raw_sim else "")
             )
         else:
             logger.warning(f"❌ Не удалось создать interest_match для ({user_i}, {user_j})")

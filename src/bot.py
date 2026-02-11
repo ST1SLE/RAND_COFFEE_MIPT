@@ -25,7 +25,7 @@ from telegram.ext import (
     filters,
     CallbackQueryHandler,
 )
-from icebreakers import ICEBREAKER_QUESTIONS
+from icebreakers import ICEBREAKER_QUESTIONS, VALENTINE_ICEBREAKERS
 from dotenv import load_dotenv
 from db import (
     add_or_update_user,
@@ -76,6 +76,9 @@ from db import (
     expire_interest_matches,
     get_stale_interest_proposals,
     mark_proposal_reminder_sent,
+    # Пол
+    get_user_gender,
+    set_user_gender,
 )
 
 load_dotenv()
@@ -105,7 +108,9 @@ logger = logging.getLogger(__name__)
     INTEREST_PROPOSE_SHOP,
     INTEREST_PROPOSE_DATE,
     INTEREST_PROPOSE_TIME,
-) = range(16)
+    GENDER_GATE,
+    REGISTER_GENDER,
+) = range(18)
 
 MAX_NEGOTIATION_ROUNDS = 5
 
@@ -119,6 +124,54 @@ def display_similarity(raw_score: float) -> int:
     """
     clamped = max(0.15, min(raw_score, 1.0))
     return round(55 + (clamped - 0.15) * (95 - 55) / (1.0 - 0.15))
+
+
+VALENTINE_START = datetime(2026, 2, 13, tzinfo=MOSCOW_TIMEZONE)
+VALENTINE_END = datetime(2026, 2, 16, tzinfo=MOSCOW_TIMEZONE)
+
+
+def is_valentine_period() -> bool:
+    """Проверяет, активен ли Valentine's Day режим (13-15 февраля 2026)."""
+    now = datetime.now(MOSCOW_TIMEZONE)
+    return VALENTINE_START <= now <= VALENTINE_END
+
+
+async def _check_gender_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Проверяет, указан ли пол у пользователя.
+    Если нет — показывает inline-кнопки для выбора и возвращает True.
+    Вызывающий хэндлер должен вернуть GENDER_GATE.
+    """
+    user_id = update.effective_user.id
+    uni_id = BOT_CONFIG["university_id"]
+    gender = get_user_gender(user_id, uni_id)
+    if gender is not None:
+        return False
+
+    keyboard = [
+        [
+            InlineKeyboardButton("👨 Парень", callback_data="set_gender_M"),
+            InlineKeyboardButton("👩 Девушка", callback_data="set_gender_F"),
+        ],
+        [InlineKeyboardButton("Не хочу указывать", callback_data="set_gender_skip")],
+    ]
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Один момент! Укажи, пожалуйста, свой пол:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    return True
+
+
+async def handle_gender_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обрабатывает выбор пола через inline-кнопку."""
+    query = update.callback_query
+    await query.answer()
+    gender = query.data.replace("set_gender_", "")  # M, F, or skip
+    set_user_gender(update.effective_user.id, gender, BOT_CONFIG["university_id"])
+    await query.edit_message_text("Готово!")
+    await show_main_menu_keyboard(update, context, "Теперь продолжай 👇")
+    return ConversationHandler.END
 
 
 def _get_next_matching_time_str() -> str:
@@ -235,13 +288,15 @@ async def register_school(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if school == "Никакой из них":
         context.user_data["reg_year"] = None
+        gender_keyboard = [["👨 Парень", "👩 Девушка"], ["Не хочу указывать"]]
         await update.message.reply_text(
             "Понял! Мы рады гостям и сотрудникам. 😊\n\n"
-            "Последний шаг: расскажи немного о себе. Кто ты, чем занимаешься, "
-            "о чем хочешь поговорить за чашкой кофе? Это поможет алгоритму найти тебе интересную компанию.",
-            reply_markup=ReplyKeyboardRemove(),
+            "Укажи, пожалуйста, свой пол:",
+            reply_markup=ReplyKeyboardMarkup(
+                gender_keyboard, one_time_keyboard=True, resize_keyboard=True
+            ),
         )
-        return REGISTER_BIO
+        return REGISTER_GENDER
 
     years_list = BOT_CONFIG["years"]
     await update.message.reply_text(
@@ -274,8 +329,29 @@ async def register_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     # Сохраняем во временное хранилище
     context.user_data["reg_year"] = int(year_str)
 
+    gender_keyboard = [["👨 Парень", "👩 Девушка"], ["Не хочу указывать"]]
     await update.message.reply_text(
-        "Супер! Последний шаг: расскажи немного о себе. 📝\n\n"
+        "Супер! Укажи, пожалуйста, свой пол:",
+        reply_markup=ReplyKeyboardMarkup(
+            gender_keyboard, one_time_keyboard=True, resize_keyboard=True
+        ),
+    )
+    return REGISTER_GENDER
+
+
+async def register_gender(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Шаг регистрации: выбор пола."""
+    choice = update.message.text
+    gender_map = {"👨 Парень": "M", "👩 Девушка": "F", "Не хочу указывать": "skip"}
+
+    if choice not in gender_map:
+        await update.message.reply_text("Пожалуйста, выбери вариант, используя кнопки.")
+        return REGISTER_GENDER
+
+    context.user_data["reg_gender"] = gender_map[choice]
+
+    await update.message.reply_text(
+        "Последний шаг: расскажи немного о себе. 📝\n\n"
         "Напиши пару предложений: чем увлекаешься, о чем любишь говорить, "
         "какой кофе пьешь. Это поможет алгоритму подбирать тебе интересную компанию.",
         reply_markup=ReplyKeyboardRemove(),
@@ -306,6 +382,11 @@ async def register_bio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     # Сохраняем все данные
     update_user_profile(user_id, school=school, year=year, bio=bio_text, uni_id=uni_id)
 
+    # Сохраняем пол (если был указан при регистрации)
+    reg_gender = context.user_data.get("reg_gender")
+    if reg_gender:
+        set_user_gender(user_id, reg_gender, uni_id)
+
     await show_main_menu_keyboard(
         update, context, text="Профиль заполнен! 🎉\nТеперь всё готово для кофе-митов."
     )
@@ -316,6 +397,9 @@ async def my_profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     """
     Показывает текущий профиль пользователя и кнопки для редактирования.
     """
+    if await _check_gender_gate(update, context):
+        return GENDER_GATE
+
     user_id = update.effective_user.id
     uni_id = BOT_CONFIG["university_id"]
     user_details = get_user_details(user_id, uni_id=uni_id)
@@ -330,18 +414,24 @@ async def my_profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     year = user_details.get("year_as_student", "Не указан")
     bio = user_details.get("bio", "Не заполнено")
     streak = user_details.get("coffee_streak", 0)
+    gender = user_details.get("gender")
+    gender_display = {"M": "👨 Парень", "F": "👩 Девушка", "skip": "Не указан"}.get(
+        gender, "Не указан"
+    )
 
     # Используем HTML теги <b> вместо Markdown звездочек
     profile_text = (
         f"👤 <b>Твой профиль:</b>\n\n"
         f"🏫 <b>Факультет:</b> {html.escape(str(school))}\n"
         f"🎓 <b>Курс:</b> {html.escape(str(year))}\n"
+        f"🚻 <b>Пол:</b> {gender_display}\n"
         f"📝 <b>О себе:</b> {html.escape(bio)}\n\n"
         f"🔥 <b>Coffee Streak:</b> {streak}"
     )
 
     keyboard = [
         [InlineKeyboardButton("✏️ Изменить «О себе»", callback_data="edit_bio")],
+        [InlineKeyboardButton("✏️ Изменить пол", callback_data="edit_gender")],
         [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -386,6 +476,34 @@ async def edit_bio_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return ConversationHandler.END
 
 
+async def edit_gender_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Показывает inline-кнопки для изменения пола."""
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [
+            InlineKeyboardButton("👨 Парень", callback_data="profile_gender_M"),
+            InlineKeyboardButton("👩 Девушка", callback_data="profile_gender_F"),
+        ],
+        [InlineKeyboardButton("Не хочу указывать", callback_data="profile_gender_skip")],
+    ]
+    await query.edit_message_text(
+        "Выбери свой пол:", reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return EDITING_PROFILE
+
+
+async def edit_gender_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Сохраняет новый пол и возвращает в меню."""
+    query = update.callback_query
+    await query.answer()
+    gender = query.data.replace("profile_gender_", "")  # M, F, or skip
+    set_user_gender(update.effective_user.id, gender, BOT_CONFIG["university_id"])
+    await query.edit_message_text("✅ Пол обновлен!")
+    await show_main_menu_keyboard(update, context, "Главное меню:")
+    return ConversationHandler.END
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "Вот что я умею:\n\n"
@@ -426,6 +544,8 @@ async def post_init(app):
 
 
 async def find_company_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _check_gender_gate(update, context):
+        return GENDER_GATE
 
     if not is_user_active(update.effective_user.id, uni_id=BOT_CONFIG["university_id"]):
         if update.callback_query:
@@ -812,6 +932,9 @@ async def show_my_streak(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def my_requests_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _check_gender_gate(update, context):
+        return GENDER_GATE
+
     user_id = update.effective_user.id
     requests = get_user_requests(user_id=user_id, uni_id=BOT_CONFIG["university_id"])
 
@@ -1158,7 +1281,15 @@ async def send_icebreakers(context: ContextTypes.DEFAULT_TYPE):
         partner_id = meeting["partner_user_id"]
         request_id = meeting["request_id"]
 
-        question = random.choice(ICEBREAKER_QUESTIONS)
+        # Valentine's icebreakers для встреч 14-16 февраля
+        meet_date = meeting["meet_time"].astimezone(MOSCOW_TIMEZONE).date()
+        valentine_dates = {
+            datetime(2026, 2, 14).date(),
+            datetime(2026, 2, 15).date(),
+            datetime(2026, 2, 16).date(),
+        }
+        questions = VALENTINE_ICEBREAKERS if meet_date in valentine_dates else ICEBREAKER_QUESTIONS
+        question = random.choice(questions)
 
         text_base = (
             f"💡 *Тема для разогрева*\n\n"
@@ -1896,6 +2027,9 @@ async def auto_cancel_job(context: ContextTypes.DEFAULT_TYPE):
 
 async def interest_match_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Главное меню режима мэтчинга по интересам."""
+    if await _check_gender_gate(update, context):
+        return GENDER_GATE
+
     user_id = update.effective_user.id
     uni_id = BOT_CONFIG["university_id"]
 
@@ -2381,23 +2515,38 @@ async def notify_interest_matches_job(context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
-        text_1 = (
-            f"🎯 Мэтчинг по интересам!\n\n"
-            f"Мы нашли для вас собеседника с похожими интересами!\n\n"
-            f"📝 О партнере: {bio_2_excerpt}\n"
-            f"📊 Совместимость: {similarity_pct}%\n\n"
-            f"Чтобы встреча состоялась, нужно договориться о месте и времени.\n"
-            f"Один из вас предложит детали встречи, а другой подтвердит."
-        )
-
-        text_2 = (
-            f"🎯 Мэтчинг по интересам!\n\n"
-            f"Мы нашли для вас собеседника с похожими интересами!\n\n"
-            f"📝 О партнере: {bio_1_excerpt}\n"
-            f"📊 Совместимость: {similarity_pct}%\n\n"
-            f"Чтобы встреча состоялась, нужно договориться о месте и времени.\n"
-            f"Один из вас предложит детали встречи, а другой подтвердит."
-        )
+        if is_valentine_period():
+            text_1 = (
+                f"💝 Романтический мэтч!\n\n"
+                f"Мы нашли тебе особенного собеседника!\n\n"
+                f"📝 О партнере: {bio_2_excerpt}\n"
+                f"📊 Совместимость: {similarity_pct}%\n\n"
+                f"Самое время договориться о встрече 💕"
+            )
+            text_2 = (
+                f"💝 Романтический мэтч!\n\n"
+                f"Мы нашли тебе особенного собеседника!\n\n"
+                f"📝 О партнере: {bio_1_excerpt}\n"
+                f"📊 Совместимость: {similarity_pct}%\n\n"
+                f"Самое время договориться о встрече 💕"
+            )
+        else:
+            text_1 = (
+                f"🎯 Мэтчинг по интересам!\n\n"
+                f"Мы нашли для вас собеседника с похожими интересами!\n\n"
+                f"📝 О партнере: {bio_2_excerpt}\n"
+                f"📊 Совместимость: {similarity_pct}%\n\n"
+                f"Чтобы встреча состоялась, нужно договориться о месте и времени.\n"
+                f"Один из вас предложит детали встречи, а другой подтвердит."
+            )
+            text_2 = (
+                f"🎯 Мэтчинг по интересам!\n\n"
+                f"Мы нашли для вас собеседника с похожими интересами!\n\n"
+                f"📝 О партнере: {bio_1_excerpt}\n"
+                f"📊 Совместимость: {similarity_pct}%\n\n"
+                f"Чтобы встреча состоялась, нужно договориться о месте и времени.\n"
+                f"Один из вас предложит детали встречи, а другой подтвердит."
+            )
 
         try:
             await context.bot.send_message(chat_id=user_1_id, text=text_1, reply_markup=reply_markup)
@@ -2581,6 +2730,12 @@ def main():
                     register_year,
                 )
             ],
+            REGISTER_GENDER: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER,
+                    register_gender,
+                )
+            ],
             REGISTER_BIO: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND & ~MENU_BUTTONS_FILTER, register_bio
@@ -2664,6 +2819,8 @@ def main():
             # --- Профиль ---
             EDITING_PROFILE: [
                 CallbackQueryHandler(edit_bio_prompt, pattern="^edit_bio$"),
+                CallbackQueryHandler(edit_gender_prompt, pattern="^edit_gender$"),
+                CallbackQueryHandler(edit_gender_save, pattern="^profile_gender_"),
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             EDITING_BIO: [
@@ -2695,6 +2852,10 @@ def main():
                     interest_propose_time,
                 ),
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
+            ],
+            # --- Gender gate ---
+            GENDER_GATE: [
+                CallbackQueryHandler(handle_gender_gate, pattern="^set_gender_"),
             ],
         },
         fallbacks=[

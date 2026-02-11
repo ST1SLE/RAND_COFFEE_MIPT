@@ -14,6 +14,7 @@ services:
       - ./migrations/001_enable_vector.sql:/docker-entrypoint-initdb.d/2_vector_migration.sql
       - ./migrations/003_add_interest_matching.sql:/docker-entrypoint-initdb.d/3_interest_matching.sql
       - ./migrations/004_interest_match_reminders.sql:/docker-entrypoint-initdb.d/4_interest_match_reminders.sql
+      - ./migrations/005_add_gender.sql:/docker-entrypoint-initdb.d/5_add_gender.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 3s

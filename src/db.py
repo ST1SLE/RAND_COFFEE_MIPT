@@ -306,7 +306,8 @@ def get_user_details(user_id: int, uni_id: int) -> dict:
         phystech_school,
         year_as_student,
         coffee_streak,
-        bio
+        bio,
+        gender
     FROM
         users
     WHERE
@@ -325,7 +326,8 @@ def get_user_details(user_id: int, uni_id: int) -> dict:
                         "phystech_school": result[2],
                         "year_as_student": result[3],
                         "coffee_streak": result[4] if result[4] else 0,
-                        "bio": result[5],  # Добавили возврат bio
+                        "bio": result[5],
+                        "gender": result[6],
                     }
     except Exception as e:
         print(f"ERROR in get_user_details(): {e}")
@@ -1259,10 +1261,10 @@ def count_searching_users_without_embeddings(uni_id: int) -> int:
 def get_interest_search_users(uni_id: int) -> list:
     """
     Возвращает пользователей в режиме поиска с готовыми эмбеддингами.
-    Returns: [(user_id, embedding), ...]
+    Returns: [(user_id, embedding, gender), ...]
     """
     sql = """
-    SELECT user_id, embedding
+    SELECT user_id, embedding, gender
     FROM users
     WHERE is_searching_interest_match = TRUE
       AND embedding IS NOT NULL
@@ -1648,6 +1650,38 @@ def get_interest_match_by_id(match_id: int, uni_id: int) -> dict | None:
     except Exception as e:
         print(f"ERROR in get_interest_match_by_id: {e}")
         return None
+
+
+def get_user_gender(user_id: int, uni_id: int):
+    """Возвращает пол пользователя: 'M', 'F', 'skip' или None (ещё не спрашивали)."""
+    sql = """
+    SELECT gender FROM users
+    WHERE user_id = %s AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (user_id, uni_id))
+                result = cur.fetchone()
+                return result[0] if result else None
+    except Exception as e:
+        logger.error(f"ERROR in get_user_gender: {e}")
+        return None
+
+
+def set_user_gender(user_id: int, gender: str, uni_id: int):
+    """Устанавливает пол пользователя."""
+    sql = """
+    UPDATE users SET gender = %s
+    WHERE user_id = %s AND university_id = %s;
+    """
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (gender, user_id, uni_id))
+                conn.commit()
+    except Exception as e:
+        logger.error(f"ERROR in set_user_gender: {e}")
 
 
 def has_user_bio(user_id: int, uni_id: int) -> bool:

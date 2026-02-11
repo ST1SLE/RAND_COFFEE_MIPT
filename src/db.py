@@ -1308,7 +1308,7 @@ def create_interest_match(user_1: int, user_2: int, similarity: float, uni_id: i
                 if cur.fetchone()[0] > 0:
                     logger.info(f"Skipping: user {user_1} or {user_2} already has active interest_match")
                     return None
-                cur.execute(insert_sql, (user_1, user_2, similarity, uni_id))
+                cur.execute(insert_sql, (user_1, user_2, float(similarity), uni_id))
                 match_id = cur.fetchone()[0]
                 cur.execute(reset_sql, (user_1, user_2, uni_id))
                 conn.commit()

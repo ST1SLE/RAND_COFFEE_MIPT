@@ -54,7 +54,9 @@ services:
 
   # ML Worker: Генерирует эмбеддинги для пользователей
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
     restart: always
     depends_on:
       db:

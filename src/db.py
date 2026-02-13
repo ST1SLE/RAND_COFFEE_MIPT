@@ -59,6 +59,10 @@ def get_db_connection():
         raise
     finally:
         if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             DB_POOL.putconn(conn)
 
 
@@ -1669,19 +1673,29 @@ def get_user_gender(user_id: int, uni_id: int):
         return None
 
 
-def set_user_gender(user_id: int, gender: str, uni_id: int):
-    """Устанавливает пол пользователя."""
+def set_user_gender(user_id: int, gender: str, uni_id: int) -> bool:
+    """Устанавливает пол пользователя. Возвращает True при успехе."""
+    if gender not in ("M", "F", "skip"):
+        logger.error(f"Invalid gender value: {gender}")
+        return False
     sql = """
     UPDATE users SET gender = %s
-    WHERE user_id = %s AND university_id = %s;
+    WHERE user_id = %s AND university_id = %s
+    RETURNING user_id;
     """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, (gender, user_id, uni_id))
+                result = cur.fetchone()
                 conn.commit()
+                if result:
+                    return True
+                logger.error(f"set_user_gender: no row matched user_id={user_id}, uni_id={uni_id}")
+                return False
     except Exception as e:
         logger.error(f"ERROR in set_user_gender: {e}")
+        return False
 
 
 def has_user_bio(user_id: int, uni_id: int) -> bool:

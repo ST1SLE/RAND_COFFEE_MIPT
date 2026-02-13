@@ -168,9 +168,14 @@ async def handle_gender_gate(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     gender = query.data.replace("set_gender_", "")  # M, F, or skip
-    set_user_gender(update.effective_user.id, gender, BOT_CONFIG["university_id"])
-    await query.edit_message_text("Готово!")
-    await show_main_menu_keyboard(update, context, "Теперь продолжай 👇")
+    success = set_user_gender(update.effective_user.id, gender, BOT_CONFIG["university_id"])
+    if success:
+        await query.edit_message_text("Готово!")
+        await show_main_menu_keyboard(update, context, "Теперь продолжай 👇")
+    else:
+        await query.edit_message_text(
+            "Произошла ошибка при сохранении. Попробуй ещё раз позже."
+        )
     return ConversationHandler.END
 
 
@@ -498,8 +503,11 @@ async def edit_gender_save(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     query = update.callback_query
     await query.answer()
     gender = query.data.replace("profile_gender_", "")  # M, F, or skip
-    set_user_gender(update.effective_user.id, gender, BOT_CONFIG["university_id"])
-    await query.edit_message_text("✅ Пол обновлен!")
+    success = set_user_gender(update.effective_user.id, gender, BOT_CONFIG["university_id"])
+    if success:
+        await query.edit_message_text("✅ Пол обновлен!")
+    else:
+        await query.edit_message_text("Произошла ошибка при сохранении. Попробуй позже.")
     await show_main_menu_keyboard(update, context, "Главное меню:")
     return ConversationHandler.END
 

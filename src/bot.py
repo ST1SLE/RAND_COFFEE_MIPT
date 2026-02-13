@@ -2181,13 +2181,21 @@ async def interest_match_enter(update: Update, context: ContextTypes.DEFAULT_TYP
     set_interest_search(user_id, uni_id, True)
     pool_count = get_interest_search_count(uni_id)
 
-    text = (
-        "✅ Вы вошли в режим мэтчинга по интересам!\n\n"
-        f"Участников в пуле: {pool_count}\n"
-        "Раз в 1-2 дня мы подберем вам собеседника на основе ваших интересов.\n\n"
-        "📊 Вы также можете продолжать создавать заявки "
-        "и откликаться на чужие в обычном режиме."
-    )
+    if is_valentine_period():
+        text = (
+            "💝 Вы вошли в Valentine's мэтчинг!\n\n"
+            f"Участников в пуле: {pool_count}\n"
+            "Алгоритм подберет тебе особенного собеседника — "
+            "первые мэтчи уже сегодня вечером 💕"
+        )
+    else:
+        text = (
+            "✅ Вы вошли в режим мэтчинга по интересам!\n\n"
+            f"Участников в пуле: {pool_count}\n"
+            "Раз в 1-2 дня мы подберем вам собеседника на основе ваших интересов.\n\n"
+            "📊 Вы также можете продолжать создавать заявки "
+            "и откликаться на чужие в обычном режиме."
+        )
 
     await query.edit_message_text(text)
     await show_main_menu_keyboard(update, context, "Главное меню:")

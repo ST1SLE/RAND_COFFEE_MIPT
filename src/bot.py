@@ -2052,12 +2052,20 @@ async def interest_match_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     is_searching = is_user_searching_interest(user_id, uni_id)
     if is_searching:
         pool_count = get_interest_search_count(uni_id)
-        text = (
-            "✅ Вы в режиме мэтчинга по интересам.\n\n"
-            f"Участников в пуле: {pool_count}\n"
-            f"{_get_next_matching_time_str()}\n\n"
-            "Вы по-прежнему можете создавать заявки и откликаться на чужие в обычном режиме."
-        )
+        if is_valentine_period():
+            text = (
+                "💝 Вы в режиме Valentine's мэтчинга!\n\n"
+                f"Участников в пуле: {pool_count}\n"
+                f"{_get_next_matching_time_str()}\n\n"
+                "Алгоритм подберет тебе особенного собеседника 💕"
+            )
+        else:
+            text = (
+                "✅ Вы в режиме мэтчинга по интересам.\n\n"
+                f"Участников в пуле: {pool_count}\n"
+                f"{_get_next_matching_time_str()}\n\n"
+                "Вы по-прежнему можете создавать заявки и откликаться на чужие в обычном режиме."
+            )
         keyboard = [
             [InlineKeyboardButton("❌ Выйти из режима", callback_data="interest_exit")],
             [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],
@@ -2075,14 +2083,23 @@ async def interest_match_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
         return ConversationHandler.END
 
     pool_count = get_interest_search_count(uni_id)
-    text = (
-        "🔍 *Мэтчинг по интересам*\n\n"
-        "Войдите в режим поиска, и раз в 1-2 дня мы подберем вам собеседника "
-        "на основе ваших интересов.\n\n"
-        f"Участников в пуле: {pool_count}\n\n"
-        "📊 Вы также можете продолжать создавать заявки "
-        "и откликаться на чужие в обычном режиме."
-    )
+    if is_valentine_period():
+        text = (
+            "💝 *Мэтчинг по интересам — Valentine's Special!*\n\n"
+            "В честь Дня Святого Валентина алгоритм подберет тебе "
+            "особенного собеседника!\n\n"
+            f"Участников в пуле: {pool_count}\n\n"
+            "Войди в режим поиска — первые мэтчи уже сегодня вечером 💕"
+        )
+    else:
+        text = (
+            "🔍 *Мэтчинг по интересам*\n\n"
+            "Войдите в режим поиска, и раз в 1-2 дня мы подберем вам собеседника "
+            "на основе ваших интересов.\n\n"
+            f"Участников в пуле: {pool_count}\n\n"
+            "📊 Вы также можете продолжать создавать заявки "
+            "и откликаться на чужие в обычном режиме."
+        )
     keyboard = [
         [InlineKeyboardButton("🔍 Войти в режим поиска", callback_data="interest_enter")],
         [InlineKeyboardButton("⬅️ Назад в меню", callback_data="main_menu")],

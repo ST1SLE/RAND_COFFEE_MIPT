@@ -429,7 +429,7 @@ async def my_profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"🏫 <b>Факультет:</b> {html.escape(str(school))}\n"
         f"🎓 <b>Курс:</b> {html.escape(str(year))}\n"
         f"🚻 <b>Пол:</b> {gender_display}\n"
-        f"📝 <b>О себе:</b> {html.escape(bio)}\n\n"
+        f"📝 <b>О себе:</b> {html.escape(bio) if bio else 'Не заполнено'}\n\n"
         f"🔥 <b>Coffee Streak:</b> {streak}"
     )
 

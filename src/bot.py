@@ -153,7 +153,6 @@ async def _check_gender_gate(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("👨 Парень", callback_data="set_gender_M"),
             InlineKeyboardButton("👩 Девушка", callback_data="set_gender_F"),
         ],
-        [InlineKeyboardButton("Не хочу указывать", callback_data="set_gender_skip")],
     ]
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -293,7 +292,7 @@ async def register_school(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if school == "Никакой из них":
         context.user_data["reg_year"] = None
-        gender_keyboard = [["👨 Парень", "👩 Девушка"], ["Не хочу указывать"]]
+        gender_keyboard = [["👨 Парень", "👩 Девушка"]]
         await update.message.reply_text(
             "Понял! Мы рады гостям и сотрудникам. 😊\n\n"
             "Укажи, пожалуйста, свой пол:",
@@ -334,7 +333,7 @@ async def register_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     # Сохраняем во временное хранилище
     context.user_data["reg_year"] = int(year_str)
 
-    gender_keyboard = [["👨 Парень", "👩 Девушка"], ["Не хочу указывать"]]
+    gender_keyboard = [["👨 Парень", "👩 Девушка"]]
     await update.message.reply_text(
         "Супер! Укажи, пожалуйста, свой пол:",
         reply_markup=ReplyKeyboardMarkup(
@@ -347,7 +346,7 @@ async def register_year(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def register_gender(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Шаг регистрации: выбор пола."""
     choice = update.message.text
-    gender_map = {"👨 Парень": "M", "👩 Девушка": "F", "Не хочу указывать": "skip"}
+    gender_map = {"👨 Парень": "M", "👩 Девушка": "F"}
 
     if choice not in gender_map:
         await update.message.reply_text("Пожалуйста, выбери вариант, используя кнопки.")
@@ -490,7 +489,6 @@ async def edit_gender_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("👨 Парень", callback_data="profile_gender_M"),
             InlineKeyboardButton("👩 Девушка", callback_data="profile_gender_F"),
         ],
-        [InlineKeyboardButton("Не хочу указывать", callback_data="profile_gender_skip")],
     ]
     await query.edit_message_text(
         "Выбери свой пол:", reply_markup=InlineKeyboardMarkup(keyboard)

@@ -34,8 +34,7 @@ services:
       - DB_HOST=db
     command: python src/bot.py --config config/mipt.json
 
-  # НОВЫЙ СЕРВИС: Запускает скрипт один раз и выходит
-  seeder:
+  seeder_mipt:
     build: .
     depends_on:
       db:
@@ -44,15 +43,18 @@ services:
       - .env
     environment:
       - DB_HOST=db
-    command: >
-      bash -c "
-        echo 'Waiting for DB to be ready...';
-        sleep 10; # Даем Postgres время на инициализацию
-        echo 'Running seeder script...';
-        python add_coffee_shops.py;
-        echo 'Seeder finished.';
-      "
-    # 'restart: no' не нужен, т.к. сервис сам завершится после выполнения команды
+    command: python add_coffee_shops.py --config data/coffee_shops_mipt.json
+
+  seeder_misis:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+    command: python add_coffee_shops.py --config data/coffee_shops_misis.json
 
   # ML Worker: Генерирует эмбеддинги для пользователей
   worker:

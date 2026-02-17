@@ -1,0 +1,117 @@
+services:
+  db:
+    image: ankane/pgvector:v0.5.1
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/1_schema.sql
+      - ./migrations/001_enable_vector.sql:/docker-entrypoint-initdb.d/2_vector_migration.sql
+      - ./migrations/003_add_interest_matching.sql:/docker-entrypoint-initdb.d/3_interest_matching.sql
+      - ./migrations/004_interest_match_reminders.sql:/docker-entrypoint-initdb.d/4_interest_match_reminders.sql
+      - ./migrations/005_add_gender.sql:/docker-entrypoint-initdb.d/5_add_gender.sql
+      - ./migrations/006_catchup_from_main.sql:/docker-entrypoint-initdb.d/6_catchup_from_main.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  bot_mipt:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+    command: python src/bot.py --config config/mipt.json
+
+  # Matcher Service: Автоматический мэтчинг пользователей на основе косинусного сходства
+  matcher_mipt:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+    command: python src/matcher_service.py --config config/mipt.json
+
+  seeder_mipt:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+    command: python add_coffee_shops.py --config data/coffee_shops_mipt.json
+
+  seeder_misis:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+    command: python add_coffee_shops.py --config data/coffee_shops_misis.json
+
+  # ML Worker: Один воркер генерирует эмбеддинги для ВСЕХ вузов
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+    volumes:
+      - model_cache:/root/.cache/torch/sentence_transformers
+    command: python src/worker.py --config config/mipt.json config/misis.json
+
+  bot_misis:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - DB_HOST=db
+    command: python src/bot.py --config config/misis.json
+
+  matcher_misis:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    env_file: .env
+    environment:
+      - DB_HOST=db
+    command: python src/matcher_service.py --config config/misis.json
+
+volumes:
+  postgres_data:
+  model_cache: # Хранит загруженные ML модели между перезапусками

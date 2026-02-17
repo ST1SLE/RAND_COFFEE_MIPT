@@ -21,6 +21,14 @@ CREATE TYPE cancellation_event_enum AS ENUM (
     'admin_ban_cancel' 
 );
 
+CREATE TABLE universities (
+    id SERIAL PRIMARY KEY,
+    slug VARCHAR(50) UNIQUE NOT NULL, -- 'mipt', 'hse', 'msu' и т.д.
+    name VARCHAR(255) NOT NULL,
+    timezone VARCHAR(50) DEFAULT 'Europe/Moscow',
+    is_active BOOLEAN DEFAULT TRUE
+);
+
 -- Таблица пользователей
 CREATE TABLE users (
     user_id BIGINT PRIMARY KEY,
@@ -33,31 +41,29 @@ CREATE TABLE users (
     year_as_student INTEGER,
     no_show_count INTEGER DEFAULT 0,
     coffee_streak INTEGER DEFAULT 0,
-    university_id INTEGER REFERENCES universities(id)
+    university_id INTEGER REFERENCES universities(id),
+    is_searching_interest_match BOOLEAN DEFAULT FALSE
 );
 
 -- Таблица кофеен
 CREATE TABLE coffee_shops (
     shop_id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL UNIQUE,
+    name VARCHAR(255) NOT NULL,
     description TEXT,
     working_hours JSONB,
     is_active BOOLEAN DEFAULT true,
-    university_id INTEGER REFERENCES universities(id)
+    university_id INTEGER REFERENCES universities(id),
+    promo_label VARCHAR(50) DEFAULT NULL,
+    partner_chat_id BIGINT[] DEFAULT NULL,
+    UNIQUE (name, university_id),
+    discount_amount INTEGER DEFAULT NULL
 );
 
-CREATE TABLE universities (
-    id SERIAL PRIMARY KEY,
-    slug VARCHAR(50) UNIQUE NOT NULL, -- 'mipt', 'hse', 'msu' и т.д.
-    name VARCHAR(255) NOT NULL,
-    timezone VARCHAR(50) DEFAULT 'Europe/Moscow',
-    is_active BOOLEAN DEFAULT TRUE
-);
 
 INSERT INTO universities (slug, name) VALUES 
     ('mipt', 'МФТИ'),
-    ('hse', 'ВШЭ'),
     ('misis', 'МИСиС'),
+    ('hse', 'ВШЭ'),
     ('bmtsu', 'МГТУ им. Баумана'),
     ('cu', 'Центральный Университет')
 ON CONFLICT (slug) DO NOTHING;
@@ -81,7 +87,9 @@ CREATE TABLE coffee_requests (
     is_confirmed_by_creator BOOLEAN DEFAULT FALSE,
     is_confirmed_by_partner BOOLEAN DEFAULT FALSE,
     is_confirmation_sent BOOLEAN DEFAULT FALSE,
-    university_id INTEGER REFERENCES universities(id)
+    is_match_notification_sent BOOLEAN DEFAULT FALSE,  -- Флаг для уведомлений о ML-мэтчинге
+    university_id INTEGER REFERENCES universities(id),
+    verification_code VARCHAR(10) DEFAULT NULL
 );
 
 CREATE TABLE cancellation_logs (
@@ -92,6 +100,24 @@ CREATE TABLE cancellation_logs (
     event_time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+
+-- Таблица мэтчей по интересам (режим "Мэтчинг по интересам")
+CREATE TABLE interest_matches (
+    match_id SERIAL PRIMARY KEY,
+    user_1_id BIGINT NOT NULL REFERENCES users(user_id),
+    user_2_id BIGINT NOT NULL REFERENCES users(user_id),
+    similarity_score REAL NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'proposed',
+    coffee_request_id INTEGER REFERENCES coffee_requests(request_id),
+    proposed_shop_id INTEGER REFERENCES coffee_shops(shop_id),
+    proposed_meet_time TIMESTAMP WITH TIME ZONE,
+    proposed_by BIGINT REFERENCES users(user_id),
+    negotiation_round INTEGER DEFAULT 0,
+    university_id INTEGER NOT NULL REFERENCES universities(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    is_notification_sent BOOLEAN DEFAULT FALSE
+);
 
 -- Индексы для ускорения выборок
 CREATE INDEX ON coffee_requests (creator_user_id);
@@ -107,3 +133,6 @@ CREATE INDEX ON cancellation_logs (user_id);
 CREATE INDEX ON users (university_id);
 
 CREATE INDEX ON coffee_shops (university_id);
+
+CREATE INDEX idx_interest_matches_status ON interest_matches(status, university_id);
+CREATE INDEX idx_interest_matches_users ON interest_matches(user_1_id, user_2_id);

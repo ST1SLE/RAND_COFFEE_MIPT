@@ -120,7 +120,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      worker_mipt:
+      worker_misis:
         condition: service_started
     env_file: .env
     environment:

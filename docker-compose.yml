@@ -146,6 +146,40 @@ services:
       - DB_HOST=db
     command: python add_coffee_shops.py --config data/coffee_shops_hse.json
 
+  bot_cu:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - DB_HOST=db
+    command: python src/bot.py --config config/cu.json
+
+  matcher_cu:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    env_file: .env
+    environment:
+      - DB_HOST=db
+    command: python src/matcher_service.py --config config/cu.json
+
+  seeder_cu:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - DB_HOST=db
+    command: python add_coffee_shops.py --config data/coffee_shops_cu.json
+
 volumes:
   postgres_data:
   model_cache: # Хранит загруженные ML модели между перезапусками

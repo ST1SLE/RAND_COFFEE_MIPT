@@ -41,7 +41,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      worker_mipt:
+      worker:
         condition: service_started
     env_file:
       - .env
@@ -71,8 +71,8 @@ services:
       - DB_HOST=db
     command: python add_coffee_shops.py --config data/coffee_shops_misis.json
 
-  # ML Worker: Генерирует эмбеддинги для пользователей
-  worker_mipt:
+  # ML Worker: Один воркер генерирует эмбеддинги для ВСЕХ вузов
+  worker:
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -85,8 +85,8 @@ services:
     environment:
       - DB_HOST=db
     volumes:
-      - model_cache:/root/.cache/torch/sentence_transformers # Кеш моделей ML (сохраняется между перезапусками)
-    command: python src/worker.py --config config/mipt.json
+      - model_cache:/root/.cache/torch/sentence_transformers
+    command: python src/worker.py --config config/mipt.json config/misis.json
 
   bot_misis:
     build: .
@@ -99,28 +99,13 @@ services:
       - DB_HOST=db
     command: python src/bot.py --config config/misis.json
 
-  worker_misis:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    restart: always
-    depends_on:
-      db:
-        condition: service_healthy
-    env_file: .env
-    environment:
-      - DB_HOST=db
-    volumes:
-      - model_cache:/root/.cache/torch/sentence_transformers
-    command: python src/worker.py --config config/misis.json
-
   matcher_misis:
     build: .
     restart: always
     depends_on:
       db:
         condition: service_healthy
-      worker_misis:
+      worker:
         condition: service_started
     env_file: .env
     environment:

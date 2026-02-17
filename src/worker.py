@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Глобальная переменная для модели (загружается один раз)
 MODEL = None
 WORKER_CONFIG = {}
+UNIVERSITY_IDS = []
 
 
 def load_model():
@@ -40,63 +41,51 @@ def load_model():
 def vectorize_users():
     """
     Основная функция воркера:
-    1. Получает пользователей с bio, но без embedding
+    1. Получает пользователей с bio, но без embedding (для всех вузов)
     2. Генерирует векторы батчами
     3. Сохраняет обратно в БД
-
-    SaaS-compliance: фильтрация по university_id из конфига.
     """
     if not MODEL:
         logger.error("Model is not loaded. Skipping vectorization.")
         return
 
-    uni_id = WORKER_CONFIG.get("university_id")
-    if not uni_id:
-        logger.error("university_id is not set in config. Aborting.")
-        return
-
     batch_size = WORKER_CONFIG.get("batch_size", 30)
 
-    try:
-        # Получаем пользователей без эмбеддингов (с фильтрацией по university_id)
-        users = get_users_without_embeddings(uni_id=uni_id, limit=batch_size)
+    for uni_id in UNIVERSITY_IDS:
+        try:
+            users = get_users_without_embeddings(uni_id=uni_id, limit=batch_size)
 
-        if not users:
-            logger.info(f"No users without embeddings for university_id={uni_id}. Sleeping...")
-            return
+            if not users:
+                continue
 
-        logger.info(f"Found {len(users)} users without embeddings. Vectorizing...")
+            logger.info(f"[uni={uni_id}] Found {len(users)} users without embeddings. Vectorizing...")
 
-        user_ids = [u[0] for u in users]
+            user_ids = [u[0] for u in users]
 
-        # Обогащаем текст: факультет + курс + bio
-        # Это позволяет модели учитывать академический контекст при подборе пар
-        enriched_texts = []
-        for user_id, bio, school, year in users:
-            parts = []
-            if school and school != "Никакой из них":
-                parts.append(f"Факультет: {school}")
-            if year:
-                parts.append(f"Курс: {year}")
-            parts.append(f"О себе: {bio}")
-            enriched_texts.append(". ".join(parts))
+            # Обогащаем текст: факультет + курс + bio
+            enriched_texts = []
+            for user_id, bio, school, year in users:
+                parts = []
+                if school and school != "Никакой из них":
+                    parts.append(f"Факультет: {school}")
+                if year:
+                    parts.append(f"Курс: {year}")
+                parts.append(f"О себе: {bio}")
+                enriched_texts.append(". ".join(parts))
 
-        # Генерация эмбеддингов батчем (быстрее, чем по одному)
-        embeddings = MODEL.encode(enriched_texts, convert_to_numpy=True, show_progress_bar=False)
+            embeddings = MODEL.encode(enriched_texts, convert_to_numpy=True, show_progress_bar=False)
 
-        # Сохраняем в БД
-        success_count = 0
-        for user_id, embedding in zip(user_ids, embeddings):
-            # embedding.tolist() преобразует numpy array в список Python
-            if update_user_embedding(user_id, embedding.tolist(), uni_id):
-                success_count += 1
-            else:
-                logger.warning(f"Failed to update embedding for user {user_id}")
+            success_count = 0
+            for user_id, embedding in zip(user_ids, embeddings):
+                if update_user_embedding(user_id, embedding.tolist(), uni_id):
+                    success_count += 1
+                else:
+                    logger.warning(f"Failed to update embedding for user {user_id}")
 
-        logger.info(f"✅ Successfully vectorized {success_count}/{len(users)} users.")
+            logger.info(f"[uni={uni_id}] ✅ Vectorized {success_count}/{len(users)} users.")
 
-    except Exception as e:
-        logger.error(f"ERROR in vectorize_users: {e}")
+        except Exception as e:
+            logger.error(f"ERROR in vectorize_users for uni={uni_id}: {e}")
 
 
 def load_config(path: str):
@@ -107,13 +96,22 @@ def load_config(path: str):
 
 def main():
     parser = argparse.ArgumentParser(description="ML Worker for Random Coffee Bot")
-    parser.add_argument("--config", help="Path to configuration file", required=True)
+    parser.add_argument("--config", nargs="+", help="Path(s) to configuration file(s)", required=True)
     args = parser.parse_args()
 
-    global WORKER_CONFIG
-    WORKER_CONFIG = load_config(args.config)
+    global WORKER_CONFIG, UNIVERSITY_IDS
 
-    logger.info(f"Worker starting for university_id={WORKER_CONFIG.get('university_id')}")
+    # Собираем university_id из всех конфигов
+    for config_path in args.config:
+        cfg = load_config(config_path)
+        uni_id = cfg.get("university_id")
+        if uni_id and uni_id not in UNIVERSITY_IDS:
+            UNIVERSITY_IDS.append(uni_id)
+        # Используем batch_size из первого конфига
+        if not WORKER_CONFIG:
+            WORKER_CONFIG = cfg
+
+    logger.info(f"Worker starting for university_ids={UNIVERSITY_IDS}")
     logger.info(f"Batch size: {WORKER_CONFIG.get('batch_size', 30)}")
 
     # Инициализация БД и модели

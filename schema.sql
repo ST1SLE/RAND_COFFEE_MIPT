@@ -62,8 +62,8 @@ CREATE TABLE coffee_shops (
 
 INSERT INTO universities (slug, name) VALUES 
     ('mipt', 'МФТИ'),
-    ('hse', 'ВШЭ'),
     ('misis', 'МИСиС'),
+    ('hse', 'ВШЭ'),
     ('bmtsu', 'МГТУ им. Баумана'),
     ('cu', 'Центральный Университет')
 ON CONFLICT (slug) DO NOTHING;

@@ -86,7 +86,7 @@ services:
       - DB_HOST=db
     volumes:
       - model_cache:/root/.cache/torch/sentence_transformers
-    command: python src/worker.py --config config/mipt.json config/misis.json
+    command: python src/worker.py --config config/mipt.json config/misis.json config/hse.json
 
   bot_misis:
     build: .
@@ -111,6 +111,40 @@ services:
     environment:
       - DB_HOST=db
     command: python src/matcher_service.py --config config/misis.json
+
+  bot_hse:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - DB_HOST=db
+    command: python src/bot.py --config config/hse.json
+
+  matcher_hse:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    env_file: .env
+    environment:
+      - DB_HOST=db
+    command: python src/matcher_service.py --config config/hse.json
+
+  seeder_hse:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - DB_HOST=db
+    command: python add_coffee_shops.py --config data/coffee_shops_hse.json
 
 volumes:
   postgres_data:

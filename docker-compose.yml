@@ -41,7 +41,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      worker:
+      worker_mipt:
         condition: service_started
     env_file:
       - .env
@@ -120,6 +120,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      worker_mipt:
+        condition: service_started
     env_file: .env
     environment:
       - DB_HOST=db

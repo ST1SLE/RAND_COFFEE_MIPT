@@ -1,27 +1,17 @@
-# Игнорируем всё, что игнорирует Git
 .git
 .gitignore
 .dockerignore
-
-# Игнорируем файлы Docker, они не нужны внутри образа
 Dockerfile
 docker-compose.yml
-
-# Игнорируем виртуальное окружение, зависимости ставятся в образе по requirements.txt
 .venv/
 venv/
-
-# Игнорируем документацию и чувствительные данные
 README.md
 *.md
 sensitive_data/
+secret_files/
 *.ipynb
 coffee_bot_backup.dump
-
-# Игнорируем кэш Python
 __pycache__/
 *.pyc
-
-# Игнорируем файлы IDE
 .vscode/
 .idea/

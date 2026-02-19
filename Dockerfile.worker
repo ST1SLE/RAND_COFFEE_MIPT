@@ -8,15 +8,10 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY requirements.txt requirements-ml.txt ./
-
-# Устанавливаем базовые зависимости
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Устанавливаем PyTorch CPU-only явно через нужный индекс,
-# чтобы pip не скачал CUDA-версию с PyPI (~2.5GB вместо ~200MB)
+# CPU-only torch, иначе pip тянет CUDA-версию (~2.5GB)
 RUN pip install --no-cache-dir torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu
-
-# Устанавливаем остальные ML зависимости
 RUN pip install --no-cache-dir -r requirements-ml.txt
 
 COPY . .

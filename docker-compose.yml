@@ -34,7 +34,6 @@ services:
       - DB_HOST=db
     command: python src/bot.py --config config/mipt.json
 
-  # Matcher Service: Автоматический мэтчинг пользователей на основе косинусного сходства
   matcher_mipt:
     build: .
     restart: always
@@ -71,7 +70,6 @@ services:
       - DB_HOST=db
     command: python add_coffee_shops.py --config data/coffee_shops_misis.json
 
-  # ML Worker: Один воркер генерирует эмбеддинги для ВСЕХ вузов
   worker:
     build:
       context: .
@@ -182,4 +180,4 @@ services:
 
 volumes:
   postgres_data:
-  model_cache: # Хранит загруженные ML модели между перезапусками
+  model_cache:

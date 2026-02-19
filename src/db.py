@@ -29,15 +29,14 @@ def init_db_pool(max_retries=10, retry_delay=3):
                 password=os.getenv("DB_PASS"),
                 port=os.getenv("DB_PORT"),
             )
-            print("Database connection pool created successfully.")
+            logger.info("DB pool created")
             return
         except psycopg2.OperationalError as e:
             if attempt < max_retries:
-                print(f"DB not ready (attempt {attempt}/{max_retries}): {e}")
-                print(f"Retrying in {retry_delay}s...")
+                logger.warning(f"DB not ready (attempt {attempt}/{max_retries}): {e}")
                 time.sleep(retry_delay)
             else:
-                print(f"Failed to connect to DB after {max_retries} attempts.")
+                logger.error(f"Failed to connect after {max_retries} attempts")
                 raise
 
 
@@ -52,10 +51,10 @@ def get_db_connection():
         conn = DB_POOL.getconn()
         yield conn
     except psycopg2.OperationalError as e:
-        print(f"OperationalError in DB connection: {e}")
+        logger.error(f"DB OperationalError: {e}")
         raise
     except Exception as e:
-        print(f"General DB Error: {e}")
+        logger.error(f"DB error: {e}")
         raise
     finally:
         if conn:
@@ -85,7 +84,7 @@ def add_or_update_user(user_id: int, username: str, first_name: str, uni_id: int
                 cur.execute(sql, (user_id, username, first_name, now, now, uni_id))
                 conn.commit()
     except Exception as e:
-        print(f"DB ERROR in add_or_update_user: {e}")
+        logger.error(f"add_or_update_user: {e}")
 
 
 def add_coffee_shop(
@@ -107,7 +106,7 @@ def add_coffee_shop(
                 cur.execute(sql, (shop_id, name, description, working_hours, uni_id))
                 conn.commit()
     except Exception as e:
-        print(f"DB ERROR in add_coffee_shop: {e}")
+        logger.error(f"add_coffee_shop: {e}")
 
 
 def get_active_coffee_shops(uni_id: int) -> list:
@@ -119,7 +118,7 @@ def get_active_coffee_shops(uni_id: int) -> list:
                 cur.execute(sql, (uni_id,))
                 return cur.fetchall()
     except Exception as e:
-        print(f"error in get_active_coffee_shops(): {e}")
+        logger.error(f"get_active_coffee_shops(): {e}")
         return []
 
 
@@ -131,7 +130,7 @@ def get_all_active_users(uni_id: int) -> list:
                 cur.execute(sql, (uni_id,))
                 return [row[0] for row in cur.fetchall()]
     except Exception as e:
-        print(f"ERROR in get_all_active_users: {e}")
+        logger.error(f"get_all_active_users: {e}")
         return []
 
 
@@ -144,7 +143,7 @@ def get_shop_details(shop_id: int, uni_id: int) -> dict:
                 result = cur.fetchone()
                 return result if result else {}
     except Exception as e:
-        print(f"error in get_shop_details(): {e}")
+        logger.error(f"get_shop_details(): {e}")
         return {}
 
 
@@ -159,7 +158,7 @@ def get_shop_working_hours(shop_id: int, uni_id: int) -> dict:
                     return result["working_hours"]
                 return {}
     except Exception as e:
-        print(f"error in get_shop_working_hours(): {e}")
+        logger.error(f"get_shop_working_hours(): {e}")
         return {}
 
 
@@ -184,11 +183,9 @@ def create_coffee_request(
                 now_utc = datetime.now(timezone.utc)
                 cur.execute(sql, (creator_user_id, shop_id, meet_time, now_utc, uni_id))
                 conn.commit()
-                print(
-                    f"SUCCESS in creating coffee request for user with id: {creator_user_id}"
-                )
+                logger.info(f"Created coffee request for user {creator_user_id}")
     except Exception as e:
-        print(f"error in create_coffee_request(): {e}")
+        logger.error(f"create_coffee_request(): {e}")
 
 
 def get_pending_requests(user_id: int, uni_id: int) -> list:
@@ -227,7 +224,7 @@ def get_pending_requests(user_id: int, uni_id: int) -> list:
                 cur.execute(sql, (user_id, uni_id, user_id, uni_id))
                 return cur.fetchall()
     except Exception as e:
-        print(f"ERROR in get_pending_requests(): {e}")
+        logger.error(f"get_pending_requests(): {e}")
         return []
 
 
@@ -247,7 +244,7 @@ def increment_streaks(request_id: int, uni_id: int):
                 cur.execute(sql, (request_id, uni_id, request_id, uni_id, uni_id))
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in increment_streaks: {e}")
+        logger.error(f"increment_streaks: {e}")
 
 
 def reset_user_streak(user_id: int, uni_id: int):
@@ -260,14 +257,10 @@ def reset_user_streak(user_id: int, uni_id: int):
                 cur.execute(sql, (user_id, uni_id))
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in reset_user_streak: {e}")
+        logger.error(f"reset_user_streak: {e}")
 
 
 def get_request_details(request_id: int, uni_id: int) -> dict:
-    """
-    Получает детали заявки по request_id.
-    Фильтрация по university_id обязательна (SaaS-compliance).
-    """
     sql = """
     SELECT
         r.creator_user_id,
@@ -298,7 +291,7 @@ def get_request_details(request_id: int, uni_id: int) -> dict:
                 result = cur.fetchone()
                 return result if result else {}
     except Exception as e:
-        print(f"ERROR in get_request_details(): {e}")
+        logger.error(f"get_request_details(): {e}")
         return {}
 
 
@@ -334,7 +327,7 @@ def get_user_details(user_id: int, uni_id: int) -> dict:
                         "gender": result[6],
                     }
     except Exception as e:
-        print(f"ERROR in get_user_details(): {e}")
+        logger.error(f"get_user_details(): {e}")
     return {}
 
 
@@ -357,7 +350,7 @@ def update_user_profile(
                 cur.execute(sql, (school, year, bio, user_id, uni_id))
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in update_user_profile(): {e}")
+        logger.error(f"update_user_profile(): {e}")
 
 
 def update_user_bio(user_id: int, bio: str, uni_id: int):
@@ -378,7 +371,7 @@ def update_user_bio(user_id: int, bio: str, uni_id: int):
                 cur.execute(sql, (bio, user_id, uni_id))
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in update_user_bio(): {e}")
+        logger.error(f"update_user_bio(): {e}")
 
 
 def get_user_requests(user_id: int, uni_id: int) -> list:
@@ -422,7 +415,7 @@ def get_user_requests(user_id: int, uni_id: int) -> list:
                 cur.execute(sql, (user_id, user_id, uni_id))
                 return cur.fetchall()
     except Exception as e:
-        print(f"ERROR in get_user_requests(): {e}")
+        logger.error(f"get_user_requests(): {e}")
         return []
 
 
@@ -474,7 +467,7 @@ def pair_user_for_request(request_id: int, partner_user_id: int, uni_id: int) ->
                 else:
                     conn.rollback()
     except Exception as e:
-        print(f"ERROR in pair_user_for_request(): {e}")
+        logger.error(f"pair_user_for_request(): {e}")
         success = False
 
     return success
@@ -516,7 +509,7 @@ def cancel_request(request_id: int, user_id: int, uni_id: int) -> bool:
                 else:
                     conn.rollback()
     except Exception as e:
-        print(f"DB ERROR in cancel_request(): {e}")
+        logger.error(f"cancel_request(): {e}")
         success = False
 
     return success
@@ -566,7 +559,7 @@ def cancel_request_by_creator(
                     conn.rollback()
                     return None
     except Exception as e:
-        print(f"DB ERROR in cancel_request_by_creator(): {e}")
+        logger.error(f"cancel_request_by_creator(): {e}")
         return None
 
 
@@ -611,7 +604,7 @@ def unmatch_request(request_id: int, partner_user_id: int, uni_id: int) -> int |
                     conn.rollback()
                     return None
     except Exception as e:
-        print(f"DB ERROR in unmatch_request(): {e}")
+        logger.error(f"unmatch_request(): {e}")
         return None
 
 
@@ -651,16 +644,12 @@ def get_meetings_for_icebreaker(uni_id: int) -> list:
                 meetings = cur.fetchall()
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in get_meetings_for_icebreaker(): {e}")
+        logger.error(f"get_meetings_for_icebreaker(): {e}")
 
     return meetings
 
 
 def save_verification_code(request_id: int, code: str, uni_id: int):
-    """
-    Сохраняет код верификации для заявки.
-    Фильтрация по university_id обязательна (SaaS-compliance).
-    """
     sql = "UPDATE coffee_requests SET verification_code = %s WHERE request_id = %s AND university_id = %s;"
     try:
         with get_db_connection() as conn:
@@ -668,7 +657,7 @@ def save_verification_code(request_id: int, code: str, uni_id: int):
                 cur.execute(sql, (code, request_id, uni_id))
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in save_verification_code: {e}")
+        logger.error(f"save_verification_code: {e}")
 
 
 def get_meetings_for_reminder(uni_id: int) -> list:
@@ -707,7 +696,7 @@ def get_meetings_for_reminder(uni_id: int) -> list:
                 meetings = cur.fetchall()
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in get_meetings_for_reminder(): {e}")
+        logger.error(f"get_meetings_for_reminder(): {e}")
 
     return meetings
 
@@ -732,7 +721,7 @@ def mark_reminder_as_sent(request_id: int, uni_id: int) -> bool:
                     conn.commit()
                     success = True
     except Exception as e:
-        print(f"ERROR in mark_reminder_as_sent(): {e}")
+        logger.error(f"mark_reminder_as_sent(): {e}")
 
     return success
 
@@ -762,7 +751,7 @@ def get_meetings_to_confirm(uni_id: int) -> list:
                 meetings = cur.fetchall()
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in get_meetings_to_confirm(): {e}")
+        logger.error(f"get_meetings_to_confirm(): {e}")
     return meetings
 
 
@@ -789,7 +778,7 @@ def confirm_meeting_participation(request_id: int, user_id: int, uni_id: int) ->
                     if result[0] and result[1]:
                         both_confirmed = True
     except Exception as e:
-        print(f"ERROR in confirm_meeting_participation: {e}")
+        logger.error(f"confirm_meeting_participation: {e}")
 
     return both_confirmed
 
@@ -811,7 +800,7 @@ def increment_no_show_counter(user_id: int, uni_id: int) -> int:
                     new_count = result[0]
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in increment_no_show_counter: {e}")
+        logger.error(f"increment_no_show_counter: {e}")
     return new_count
 
 
@@ -842,7 +831,7 @@ def cancel_unconfirmed_matches(uni_id: int) -> list:
                 cancelled_meetings = cur.fetchall()
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in cancel_unconfirmed_matches(): {e}")
+        logger.error(f"cancel_unconfirmed_matches(): {e}")
     return cancelled_meetings
 
 
@@ -874,7 +863,7 @@ def expire_pending_requests(uni_id: int) -> list:
                 conn.commit()
                 expired_requests = cur.fetchall()
     except Exception as e:
-        print(f"ERROR in expire_pending_requests(): {e}")
+        logger.error(f"expire_pending_requests(): {e}")
 
     return expired_requests
 
@@ -899,7 +888,7 @@ def get_meetings_for_feedback(uni_id: int) -> list:
                 cur.execute(sql, (uni_id,))
                 return cur.fetchall()
     except Exception as e:
-        print(f"ERROR in get_meetings_for_feedback(): {e}")
+        logger.error(f"get_meetings_for_feedback(): {e}")
         return []
 
 
@@ -914,7 +903,7 @@ def mark_feedback_as_requested(request_id: int, uni_id: int) -> bool:
                     conn.commit()
                     success = True
     except Exception as e:
-        print(f"ERROR in mark_feedback_as_requested(): {e}")
+        logger.error(f"mark_feedback_as_requested(): {e}")
     return success
 
 
@@ -930,7 +919,7 @@ def save_feedback_text(request_id: int, text: str, uni_id: int):
                 cur.execute(sql, (text, request_id, uni_id))
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in save_feedback_text(): {e}")
+        logger.error(f"save_feedback_text(): {e}")
 
 
 def save_meeting_outcome(request_id: int, outcome: str, uni_id: int) -> bool:
@@ -951,7 +940,7 @@ def save_meeting_outcome(request_id: int, outcome: str, uni_id: int) -> bool:
                     conn.commit()
                     success = True
     except Exception as e:
-        print(f"ERROR in save_meeting_outcome(): {e}")
+        logger.error(f"save_meeting_outcome(): {e}")
     return success
 
 
@@ -965,14 +954,10 @@ def ban_user(user_id: int, uni_id: int):
                 cur.execute(sql, (user_id, uni_id))
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in ban_user: {e}")
+        logger.error(f"ban_user: {e}")
 
 
 def is_user_active(user_id: int, uni_id: int) -> bool:
-    """
-    Проверяет, активен ли пользователь.
-    uni_id обязателен (SaaS-compliance).
-    """
     sql = "SELECT is_active FROM users WHERE user_id = %s AND university_id = %s;"
 
     try:
@@ -985,18 +970,11 @@ def is_user_active(user_id: int, uni_id: int) -> bool:
                 else:
                     return True
     except Exception as e:
-        print(f"ERROR in is_user_active: {e}")
+        logger.error(f"is_user_active: {e}")
         return True
 
 
 def get_users_without_embeddings(uni_id: int, limit: int = 30):
-    """
-    Получает пользователей с bio, но без embedding для векторизации.
-    Строгая фильтрация по university_id (SaaS-compliance).
-
-    Returns:
-        list: [(user_id, bio, phystech_school, year_as_student), ...]
-    """
     sql = """
         SELECT user_id, bio, phystech_school, year_as_student
         FROM users
@@ -1013,23 +991,12 @@ def get_users_without_embeddings(uni_id: int, limit: int = 30):
                 cur.execute(sql, (uni_id, limit))
                 return cur.fetchall()
     except Exception as e:
-        print(f"ERROR in get_users_without_embeddings: {e}")
+        logger.error(f"get_users_without_embeddings: {e}")
         return []
 
 
 def update_user_embedding(user_id: int, embedding: list, uni_id: int):
-    """
-    Сохраняет сгенерированный эмбеддинг в БД.
-    Проверка university_id для безопасности (SaaS-compliance).
-
-    Args:
-        user_id: ID пользователя
-        embedding: Вектор размерности 384 (list of floats)
-        uni_id: ID университета для проверки
-
-    Returns:
-        bool: True если успешно, False если ошибка
-    """
+    """Сохраняет эмбеддинг пользователя в БД."""
     sql = """
         UPDATE users
         SET embedding = %s
@@ -1039,30 +1006,16 @@ def update_user_embedding(user_id: int, embedding: list, uni_id: int):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                # Преобразуем список в строку для pgvector: '[0.1, 0.2, ...]'
                 embedding_str = '[' + ','.join(map(str, embedding)) + ']'
                 cur.execute(sql, (embedding_str, user_id, uni_id))
                 conn.commit()
                 return cur.rowcount > 0
     except Exception as e:
-        print(f"ERROR in update_user_embedding for user {user_id}: {e}")
+        logger.error(f"update_user_embedding for user {user_id}: {e}")
         return False
 
 
 def get_pending_requests_for_matching(uni_id: int):
-    """
-    Получает pending заявки с эмбеддингами создателей для автоматического мэтчинга.
-
-    Условия:
-    - status = 'pending'
-    - partner_user_id IS NULL (нет партнера)
-    - meet_time > NOW() (встреча в будущем)
-    - creator имеет embedding (не NULL)
-    - Фильтрация по university_id (SaaS-compliance)
-
-    Returns:
-        list: [(request_id, creator_user_id, embedding, meet_time, shop_id), ...]
-    """
     sql = """
         SELECT
             r.request_id,
@@ -1085,18 +1038,11 @@ def get_pending_requests_for_matching(uni_id: int):
                 cur.execute(sql, (uni_id,))
                 return cur.fetchall()
     except Exception as e:
-        print(f"ERROR in get_pending_requests_for_matching: {e}")
+        logger.error(f"get_pending_requests_for_matching: {e}")
         return []
 
 
-def get_user_meeting_history(user_id: int, uni_id: int):
-    """
-    Получает список user_id, с которыми пользователь уже встречался.
-    Это нужно для исключения повторных встреч при мэтчинге.
-
-    Returns:
-        set: Множество user_id партнеров из прошлых встреч
-    """
+def get_user_meeting_history(user_id: int, uni_id: int) -> set:
     sql = """
         SELECT DISTINCT
             CASE
@@ -1116,7 +1062,7 @@ def get_user_meeting_history(user_id: int, uni_id: int):
                 results = cur.fetchall()
                 return {row[0] for row in results if row[0] is not None}
     except Exception as e:
-        print(f"ERROR in get_user_meeting_history: {e}")
+        logger.error(f"get_user_meeting_history: {e}")
         return set()
 
 
@@ -1144,18 +1090,12 @@ def get_interest_match_history(user_id: int, uni_id: int, cooldown_days: int = 3
                 results = cur.fetchall()
                 return {row[0] for row in results if row[0] is not None}
     except Exception as e:
-        print(f"ERROR in get_interest_match_history: {e}")
+        logger.error(f"get_interest_match_history: {e}")
         return set()
 
 
 def get_new_matches_for_notification(uni_id: int):
-    """
-    Получает matched заявки, для которых еще не было отправлено уведомление.
-    Используется ботом для информирования пользователей о новых матчах от ML matcher.
-
-    Returns:
-        list: [(request_id, creator_user_id, partner_user_id, meet_time), ...]
-    """
+    """Matched заявки без отправленного уведомления (атомарно помечает sent)."""
     sql = """
         UPDATE coffee_requests
         SET is_match_notification_sent = TRUE
@@ -1178,13 +1118,11 @@ def get_new_matches_for_notification(uni_id: int):
                 conn.commit()
                 return matches
     except Exception as e:
-        print(f"ERROR in get_new_matches_for_notification: {e}")
+        logger.error(f"get_new_matches_for_notification: {e}")
         return []
 
 
-# ============================================================
-# Режим "Мэтчинг по интересам" — функции для interest_matches
-# ============================================================
+# --- Мэтчинг по интересам ---
 
 
 def set_interest_search(user_id: int, uni_id: int, active: bool):
@@ -1200,7 +1138,7 @@ def set_interest_search(user_id: int, uni_id: int, active: bool):
                 cur.execute(sql, (active, user_id, uni_id))
                 conn.commit()
     except Exception as e:
-        print(f"ERROR in set_interest_search: {e}")
+        logger.error(f"set_interest_search: {e}")
 
 
 def is_user_searching_interest(user_id: int, uni_id: int) -> bool:
@@ -1217,7 +1155,7 @@ def is_user_searching_interest(user_id: int, uni_id: int) -> bool:
                 result = cur.fetchone()
                 return result[0] if result else False
     except Exception as e:
-        print(f"ERROR in is_user_searching_interest: {e}")
+        logger.error(f"is_user_searching_interest: {e}")
         return False
 
 
@@ -1236,7 +1174,7 @@ def get_interest_search_count(uni_id: int) -> int:
                 result = cur.fetchone()
                 return result[0] if result else 0
     except Exception as e:
-        print(f"ERROR in get_interest_search_count: {e}")
+        logger.error(f"get_interest_search_count: {e}")
         return 0
 
 
@@ -1258,15 +1196,11 @@ def count_searching_users_without_embeddings(uni_id: int) -> int:
                 result = cur.fetchone()
                 return result[0] if result else 0
     except Exception as e:
-        print(f"ERROR in count_searching_users_without_embeddings: {e}")
+        logger.error(f"count_searching_users_without_embeddings: {e}")
         return 0
 
 
 def get_interest_search_users(uni_id: int) -> list:
-    """
-    Возвращает пользователей в режиме поиска с готовыми эмбеддингами.
-    Returns: [(user_id, embedding, gender), ...]
-    """
     sql = """
     SELECT user_id, embedding, gender
     FROM users
@@ -1280,17 +1214,12 @@ def get_interest_search_users(uni_id: int) -> list:
                 cur.execute(sql, (uni_id,))
                 return cur.fetchall()
     except Exception as e:
-        print(f"ERROR in get_interest_search_users: {e}")
+        logger.error(f"get_interest_search_users: {e}")
         return []
 
 
 def create_interest_match(user_1: int, user_2: int, similarity: float, uni_id: int) -> int | None:
-    """
-    Создает interest_match и снимает is_searching у обоих пользователей.
-    Атомарная операция в одной транзакции.
-    Проверяет, что ни у одного из пользователей нет активного мэтча.
-    Returns: match_id или None при ошибке/пропуске.
-    """
+    """Создает interest_match и снимает is_searching у обоих. Возвращает match_id."""
     check_sql = """
     SELECT COUNT(*) FROM interest_matches
     WHERE status IN ('proposed', 'negotiating')
@@ -1364,7 +1293,7 @@ def get_pending_interest_match(user_id: int, uni_id: int) -> dict | None:
                 result = cur.fetchone()
                 return dict(result) if result else None
     except Exception as e:
-        print(f"ERROR in get_pending_interest_match: {e}")
+        logger.error(f"get_pending_interest_match: {e}")
         return None
 
 
@@ -1402,7 +1331,7 @@ def get_new_interest_matches_for_notification(uni_id: int) -> list:
                 conn.commit()
                 return matches
     except Exception as e:
-        print(f"ERROR in get_new_interest_matches_for_notification: {e}")
+        logger.error(f"get_new_interest_matches_for_notification: {e}")
         return []
 
 
@@ -1432,19 +1361,12 @@ def propose_meeting(match_id: int, shop_id: int, meet_time: datetime, proposed_b
                 conn.commit()
                 return success
     except Exception as e:
-        print(f"ERROR in propose_meeting: {e}")
+        logger.error(f"propose_meeting: {e}")
         return False
 
 
 def accept_meeting_proposal(match_id: int, uni_id: int) -> int | None:
-    """
-    Принимает предложение встречи: создает coffee_request со статусом 'matched',
-    обновляет interest_match → 'accepted'. Атомарная транзакция.
-
-    Спонтанные встречи (< 45 мин до meet_time): оба автоподтверждены.
-
-    Returns: request_id созданной заявки или None при ошибке.
-    """
+    """Принимает предложение: создает coffee_request + обновляет interest_match."""
     get_sql = """
     SELECT match_id, user_1_id, user_2_id, proposed_shop_id, proposed_meet_time
     FROM interest_matches
@@ -1502,7 +1424,7 @@ def accept_meeting_proposal(match_id: int, uni_id: int) -> int | None:
                 conn.commit()
                 return request_id
     except Exception as e:
-        print(f"ERROR in accept_meeting_proposal: {e}")
+        logger.error(f"accept_meeting_proposal: {e}")
         return None
 
 
@@ -1528,19 +1450,12 @@ def decline_interest_match(match_id: int, uni_id: int) -> dict | None:
                     return {"user_1_id": result[0], "user_2_id": result[1]}
                 return None
     except Exception as e:
-        print(f"ERROR in decline_interest_match: {e}")
+        logger.error(f"decline_interest_match: {e}")
         return None
 
 
 def expire_interest_matches(uni_id: int) -> list:
-    """
-    Экспирирует interest_matches по таймаутам:
-    - proposed: 24ч без реакции
-    - negotiating: 12ч без ответа на предложение
-    - negotiation_round >= 5: слишком много раундов
-
-    Returns: [(match_id, user_1_id, user_2_id), ...]
-    """
+    """Экспирирует interest_matches по таймаутам (proposed 24ч, negotiating 12ч, rounds >= 5)."""
     sql = """
     UPDATE interest_matches
     SET status = 'expired', updated_at = NOW()
@@ -1566,7 +1481,7 @@ def expire_interest_matches(uni_id: int) -> list:
                 conn.commit()
                 return expired
     except Exception as e:
-        print(f"ERROR in expire_interest_matches: {e}")
+        logger.error(f"expire_interest_matches: {e}")
         return []
 
 
@@ -1597,7 +1512,7 @@ def get_stale_interest_proposals(uni_id: int) -> list:
                 cur.execute(sql, (uni_id,))
                 return cur.fetchall()
     except Exception as e:
-        print(f"ERROR in get_stale_interest_proposals: {e}")
+        logger.error(f"get_stale_interest_proposals: {e}")
         return []
 
 
@@ -1616,7 +1531,7 @@ def mark_proposal_reminder_sent(match_id: int, uni_id: int) -> bool:
                 conn.commit()
                 return success
     except Exception as e:
-        print(f"ERROR in mark_proposal_reminder_sent: {e}")
+        logger.error(f"mark_proposal_reminder_sent: {e}")
         return False
 
 
@@ -1652,7 +1567,7 @@ def get_interest_match_by_id(match_id: int, uni_id: int) -> dict | None:
                 result = cur.fetchone()
                 return dict(result) if result else None
     except Exception as e:
-        print(f"ERROR in get_interest_match_by_id: {e}")
+        logger.error(f"get_interest_match_by_id: {e}")
         return None
 
 
@@ -1711,7 +1626,7 @@ def has_user_bio(user_id: int, uni_id: int) -> bool:
                 result = cur.fetchone()
                 return bool(result and result[0] and result[0].strip())
     except Exception as e:
-        print(f"ERROR in has_user_bio: {e}")
+        logger.error(f"has_user_bio: {e}")
         return False
 
 

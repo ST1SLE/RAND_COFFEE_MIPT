@@ -22,18 +22,4 @@ secret_files/
 coffee_bot_backup.dump
 postgres_data/
 
-data_analytics_plan.md
-TECHNICAL_OVERVIEW.md
-INTERVIEW_CHEATSHEET.md
-NEXT_PHASE_PLAN.md
-FIELD_TESTING_GUIDE.md
-INTEREST_MATCHING_UX_ANALYSIS.md
-PROBLEMS.md
-DEPLOY.md
-/plan.md
-PROBLEMS_V2.md
-politics.md
-politics.pdf
-refactoring_plan.md
-
 .claude/

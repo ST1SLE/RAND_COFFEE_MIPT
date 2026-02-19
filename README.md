@@ -35,12 +35,14 @@ docker compose up --build -d
 
 ## Тесты
 
-```bash
-docker cp test_worker.py <container>:/app/
-docker compose exec -T bot_mipt python test_worker.py --config config/mipt.json
-```
+Интеграционные тесты запускаются внутри контейнера (нужна БД):
 
-Аналогично `test_matcher.py`, `test_notifications.py`, `test_isolation.py`.
+```bash
+docker compose exec -T bot_mipt python tests/test_worker.py --config config/mipt.json
+docker compose exec -T bot_mipt python tests/test_matcher.py --config config/mipt.json
+docker compose exec -T bot_mipt python tests/test_isolation.py --config config/mipt.json
+docker compose exec -T bot_mipt python tests/test_interest_matching.py --config config/mipt.json
+```
 
 ## Лицензия
 

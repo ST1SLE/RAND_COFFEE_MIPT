@@ -9,9 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def expand_schedule(short_schedule):
-    """
-    Converts a compact schedule into a full, readable 7-day format.
-    """
+    """Раскрывает сокращенное расписание в полный 7-дневный формат."""
     full_schedule = {}
     days_of_week = [
         "Понедельник",
@@ -64,11 +62,7 @@ def populate_coffee_shops_table(shops_config_path: str):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Seed coffee shops from a JSON config.")
-    parser.add_argument(
-        "--config",
-        required=True,
-        help="Path to coffee shops JSON config (e.g. data/coffee_shops_mipt.json)",
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
     args = parser.parse_args()
     populate_coffee_shops_table(args.config)

@@ -1,4 +1,3 @@
--- Пользовательский тип для статусов заявок
 CREATE TYPE request_status_enum AS ENUM (
     'pending',
     'matched',
@@ -6,7 +5,6 @@ CREATE TYPE request_status_enum AS ENUM (
     'expired'
 );
 
--- Пользовательский тип для результатов встреч
 CREATE TYPE meeting_outcome_enum AS ENUM (
     'attended',
     'partner_no_show',
@@ -29,7 +27,6 @@ CREATE TABLE universities (
     is_active BOOLEAN DEFAULT TRUE
 );
 
--- Таблица пользователей
 CREATE TABLE users (
     user_id BIGINT PRIMARY KEY,
     username VARCHAR(255),
@@ -45,7 +42,6 @@ CREATE TABLE users (
     is_searching_interest_match BOOLEAN DEFAULT FALSE
 );
 
--- Таблица кофеен
 CREATE TABLE coffee_shops (
     shop_id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -68,7 +64,6 @@ INSERT INTO universities (slug, name) VALUES
     ('cu', 'Центральный Университет')
 ON CONFLICT (slug) DO NOTHING;
 
--- Таблица заявок на кофе
 CREATE TABLE coffee_requests (
     request_id SERIAL PRIMARY KEY,
     creator_user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
@@ -101,7 +96,6 @@ CREATE TABLE cancellation_logs (
 );
 
 
--- Таблица мэтчей по интересам (режим "Мэтчинг по интересам")
 CREATE TABLE interest_matches (
     match_id SERIAL PRIMARY KEY,
     user_1_id BIGINT NOT NULL REFERENCES users(user_id),
@@ -119,7 +113,6 @@ CREATE TABLE interest_matches (
     is_notification_sent BOOLEAN DEFAULT FALSE
 );
 
--- Индексы для ускорения выборок
 CREATE INDEX ON coffee_requests (creator_user_id);
 CREATE INDEX ON coffee_requests (partner_user_id);
 CREATE INDEX ON coffee_requests (status, meet_time);

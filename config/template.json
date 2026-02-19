@@ -1,13 +1,14 @@
 {
   "university_id": 1,
   "university_name": "",
-  "bot_token_env": "",
-  "admin_id": 123456789,
+  "bot_token_env": "TELEGRAM_BOT_TOKEN_<UNI>",
+  "admin_id": "ADMIN_ID_<UNI>",
+  "batch_size": 30,
   "schools": [
     ["", "", ""],
     ["", "", ""],
     ["", "", ""],
-    ["Никакая из них"]
+    ["Никакой из них"]
   ],
   "years": [["1", "2", "3", "4"], ["5", "6", "7", "8"], ["Вернуться назад"]]
 }

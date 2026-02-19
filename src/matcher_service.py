@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
-"""
-Сервис мэтчинга по интересам.
+"""Сервис периодического мэтчинга по интересам."""
 
-Запускается как отдельный контейнер в docker-compose.
-Периодически подбирает пары среди пользователей в режиме поиска
-на основе косинусного сходства эмбеддингов.
-
-Интервал задаётся через переменную окружения MATCHING_INTERVAL_HOURS (по умолчанию 6).
-"""
 import os
 import time
 import logging
@@ -27,88 +20,67 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MATCHER_CONFIG = {}
-
-# Интервал между запусками мэтчинга в часах.
-# Переопределяется через переменную окружения MATCHING_INTERVAL_HOURS.
 MATCHING_INTERVAL_HOURS = int(os.getenv("MATCHING_INTERVAL_HOURS", "6"))
 
 
 def load_config(path: str):
-    """Загружает конфигурацию из JSON файла."""
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def _wait_for_embeddings(uni_id: int, max_retries: int = 2, wait_seconds: int = 90):
-    """
-    Проверяет, есть ли пользователи в режиме поиска без эмбеддингов.
-    Если есть — ждёт, пока worker их обработает (worker запускается каждые 60с).
-    """
+    """Ждет, пока worker обработает пользователей без эмбеддингов."""
     for attempt in range(max_retries):
         missing = count_searching_users_without_embeddings(uni_id)
         if missing == 0:
-            logger.info("All searching users have embeddings.")
             return
         logger.warning(
-            f"{missing} searching user(s) lack embeddings. "
-            f"Waiting {wait_seconds}s for worker (attempt {attempt + 1}/{max_retries})..."
+            f"{missing} searching user(s) lack embeddings, "
+            f"waiting {wait_seconds}s (attempt {attempt + 1}/{max_retries})"
         )
         time.sleep(wait_seconds)
 
     remaining = count_searching_users_without_embeddings(uni_id)
     if remaining > 0:
-        logger.warning(
-            f"Still {remaining} user(s) without embeddings after retries. "
-            f"Proceeding — they will be excluded from matching."
-        )
+        logger.warning(f"Still {remaining} user(s) without embeddings after retries, proceeding")
 
 
 def run_interest_matching_job():
-    """
-    Периодический мэтчинг по интересам.
-    Подбирает пары среди пользователей с is_searching_interest_match=TRUE.
-    """
     uni_id = MATCHER_CONFIG.get("university_id")
     if not uni_id:
-        logger.error("university_id is not set in config. Aborting.")
+        logger.error("university_id is not set in config")
         return
 
     try:
         _wait_for_embeddings(uni_id)
 
-        logger.info(f"🔍 Starting interest matching job for university_id={uni_id}")
+        logger.info(f"Starting interest matching for university_id={uni_id}")
         matched_count = execute_interest_matching(uni_id)
 
         if matched_count > 0:
-            logger.info(f"✅ Interest matching completed: {matched_count} pairs created.")
+            logger.info(f"Interest matching completed: {matched_count} pairs created")
         else:
-            logger.info("No new interest matches created this cycle.")
+            logger.info("No new interest matches this cycle")
     except Exception as e:
-        logger.error(f"ERROR in run_interest_matching_job: {e}", exc_info=True)
+        logger.error(f"run_interest_matching_job: {e}", exc_info=True)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Interest Matching Service for Random Coffee Bot")
-    parser.add_argument("--config", help="Path to configuration file", required=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True)
     args = parser.parse_args()
 
     global MATCHER_CONFIG
     MATCHER_CONFIG = load_config(args.config)
 
-    logger.info(f"🚀 Interest Matching Service starting for university_id={MATCHER_CONFIG.get('university_id')}")
+    uni_id = MATCHER_CONFIG.get("university_id")
+    logger.info(f"Matcher service starting for university_id={uni_id}, interval={MATCHING_INTERVAL_HOURS}h")
 
     init_db_pool()
 
-    # Запуск каждые MATCHING_INTERVAL_HOURS часов
     schedule.every(MATCHING_INTERVAL_HOURS).hours.do(run_interest_matching_job)
 
-    logger.info(
-        f"🎯 Interest matching service is running. "
-        f"Matching every {MATCHING_INTERVAL_HOURS}h "
-        f"(set MATCHING_INTERVAL_HOURS env var to change)."
-    )
-
-    # Первый запуск сразу при старте
+    # первый запуск сразу
     run_interest_matching_job()
 
     while True:

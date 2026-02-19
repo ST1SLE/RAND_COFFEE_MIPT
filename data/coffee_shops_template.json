@@ -1,0 +1,11 @@
+{
+  "university_id": -1,
+  "shops": [
+    {
+        "id": "IMPORTANT: id is a num which have to be like 'uni_id' + 'actual_id'",
+        "name": "TODO — заполни кофейни ВШЭ",
+        "desc": "Placeholder",
+        "schedule": {"Ежедневно": "08:00-20:00"}
+    }
+  ]
+}

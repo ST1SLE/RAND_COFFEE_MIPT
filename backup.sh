@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-BACKUP_DIR="$HOME/backups"
+BACKUP_DIR="/home/deployer/backups"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 KEEP_DAYS=14
 
@@ -10,8 +10,10 @@ mkdir -p "$BACKUP_DIR"
 echo "=== Backup started at $(date) ==="
 
 # Дамп БД из Docker контейнера
-docker compose -f "$HOME/randomcoffeeMIPT/docker-compose.yml" \
-  exec -T db pg_dump -Fc -U coffee_bot_user coffee_bot_db \
+PROJECT_ROOT="/home/deployer/RAND_COFFEE_MIPT"
+
+docker compose -f "$PROJECT_ROOT/docker-compose.yml" \
+  exec -T db pg_dump -Fc -h localhost -U coffee_bot_user coffee_bot_db \
   > "$BACKUP_DIR/db_${TIMESTAMP}.dump"
 
 SIZE=$(du -h "$BACKUP_DIR/db_${TIMESTAMP}.dump" | cut -f1)

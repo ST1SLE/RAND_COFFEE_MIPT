@@ -116,12 +116,7 @@ MAX_NEGOTIATION_ROUNDS = 5
 
 
 def display_similarity(raw_score: float) -> int:
-    """
-    Конвертирует raw cosine similarity в user-facing процент.
-    Линейный remap из [0.15, 1.0] в [55, 95].
-
-    Примеры: 0.15 -> 55%, 0.30 -> 62%, 0.50 -> 72%, 0.70 -> 81%, 0.90 -> 91%
-    """
+    """Remap cosine similarity [0.15, 1.0] -> [55%, 95%] для отображения."""
     clamped = max(0.15, min(raw_score, 1.0))
     return round(55 + (clamped - 0.15) * (95 - 55) / (1.0 - 0.15))
 
@@ -137,11 +132,7 @@ def is_valentine_period() -> bool:
 
 
 async def _check_gender_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """
-    Проверяет, указан ли пол у пользователя.
-    Если нет — показывает inline-кнопки для выбора и возвращает True.
-    Вызывающий хэндлер должен вернуть GENDER_GATE.
-    """
+    """Показывает выбор пола, если не указан. True = гейт сработал."""
     user_id = update.effective_user.id
     uni_id = BOT_CONFIG["university_id"]
     gender = get_user_gender(user_id, uni_id)
@@ -825,16 +816,9 @@ async def create_request_step4_validate(
         return CHOOSING_TIME
 
 
-# ---------------------------------------------------------------------------
-# РУЧНОЙ МЭТЧИНГ (v1.0 fallback)
-#
-# Пользователь может просмотреть список pending-заявок и выбрать партнёра
-# самостоятельно.  Это запасной путь на случай, если ML-мэтчер (matcher
-# service) ещё не подобрал пару — например, при малом количестве pending
-# заявок.  Оба механизма безопасно сосуществуют: WHERE status='pending'
-# AND partner_user_id IS NULL гарантирует, что уже смэтчённые заявки
-# не появятся в списке и не будут повторно приняты.
-# ---------------------------------------------------------------------------
+# --- Ручной мэтчинг (v1.0 fallback) ---
+# Сосуществует с ML-мэтчингом: WHERE status='pending' AND partner_user_id IS NULL
+# гарантирует, что ML-смэтчённые заявки сюда не попадут.
 async def view_available_requests(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
@@ -1785,20 +1769,10 @@ async def send_confirmations_job(context: ContextTypes.DEFAULT_TYPE):
             )
 
 
-# ---------------------------------------------------------------------------
-# ML МЭТЧИНГ (v2.0) — уведомления
-#
-# Когда matcher service автоматически создаёт пару, он ставит status='matched'
-# и is_match_notification_sent=FALSE.  Этот джоб находит такие заявки,
-# атомарно помечает их notified (UPDATE...RETURNING) и отправляет сообщения.
-# Ручной мэтчинг (pair_user_for_request) сразу ставит TRUE, поэтому
-# дублирование уведомлений исключено.
-# ---------------------------------------------------------------------------
+# --- ML мэтчинг (v2.0) — уведомления ---
+# Ручной мэтчинг сразу ставит is_match_notification_sent=TRUE,
+# поэтому этот джоб обрабатывает только ML-мэтчи (где FALSE).
 async def notify_new_matches_job(context: ContextTypes.DEFAULT_TYPE):
-    """
-    Джоб для уведомления пользователей о новых автоматических матчах от ML matcher.
-    Запускается каждые 120 секунд.
-    """
     logger.info("JOB: checking for new ML matches to notify...")
 
     matches = get_new_matches_for_notification(uni_id=BOT_CONFIG["university_id"])
@@ -2026,9 +2000,7 @@ async def auto_cancel_job(context: ContextTypes.DEFAULT_TYPE):
             )
 
 
-# ============================================================
-# МЭТЧИНГ ПО ИНТЕРЕСАМ — хэндлеры
-# ============================================================
+# --- Мэтчинг по интересам ---
 
 
 async def interest_match_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

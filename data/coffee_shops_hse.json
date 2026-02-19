@@ -1,0 +1,11 @@
+{
+  "university_id": 3,
+  "shops": [
+    {
+        "id": 201,
+        "name": "TODO — заполни кофейни ВШЭ",
+        "desc": "Placeholder",
+        "schedule": {"Ежедневно": "08:00-20:00"}
+    }
+  ]
+}

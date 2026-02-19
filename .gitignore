@@ -1,49 +1,39 @@
 .vscode/
-sensitive_data/
-data_analytics_plan.md
-TECHNICAL_OVERVIEW.md
-INTERVIEW_CHEATSHEET.md
-NEXT_PHASE_PLAN.md
-FIELD_TESTING_GUIDE.md
-INTEREST_MATCHING_UX_ANALYSIS.md 
-PROBLEMS.md
-DEPLOY.md
-/plan.md
-PROBLEMS_V2.md
-politics.md
-da.ipynb
-politics.pdf
-# Байтовые файлы Python
+.idea/
+*.swp
+
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Виртуальные окружения
 .venv
 venv/
 ENV/
 
-# Файлы с секретами и переменными окружения
-# ВАЖНО: Храните .env.template или .env.example с ПРИМЕРАМИ переменных
 .env
 .env.*
 !.env.example
 !.env.template
 
-# Специфичные для проекта файлы, которые не должны быть в репозитории
 sensitive_data/
+secret_files/
 *.ipynb
 coffee_bot_backup.dump
-
-# Данные, генерируемые Docker Compose
-# (Имя тома из docker-compose.yml)
 postgres_data/
 
-# Специфичные файлы IDE/редакторов
-.vscode/
-.idea/
-*.swp
+data_analytics_plan.md
+TECHNICAL_OVERVIEW.md
+INTERVIEW_CHEATSHEET.md
+NEXT_PHASE_PLAN.md
+FIELD_TESTING_GUIDE.md
+INTEREST_MATCHING_UX_ANALYSIS.md
+PROBLEMS.md
+DEPLOY.md
+/plan.md
+PROBLEMS_V2.md
+politics.md
+politics.pdf
+refactoring_plan.md
 
-# Claude Code
 .claude/

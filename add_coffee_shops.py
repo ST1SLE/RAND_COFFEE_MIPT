@@ -28,11 +28,21 @@ def expand_schedule(short_schedule):
         elif key == "Пн-Пт":
             for i in range(5):
                 full_schedule[days_of_week[i]] = hours
+        elif key == "Пн-Сб":
+            for i in range(6):
+                full_schedule[days_of_week[i]] = hours
+        elif key == "Вт-Пт":
+            for i in range(1, 5):
+                full_schedule[days_of_week[i]] = hours
         elif key == "Сб-Вс":
             full_schedule[days_of_week[5]] = hours
             full_schedule[days_of_week[6]] = hours
+        elif key == "Пн":
+            full_schedule[days_of_week[0]] = hours
         elif key == "Сб":
             full_schedule[days_of_week[5]] = hours
+        elif key == "Вс":
+            full_schedule[days_of_week[6]] = hours
 
     return full_schedule
 

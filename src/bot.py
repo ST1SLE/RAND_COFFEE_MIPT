@@ -674,6 +674,7 @@ async def create_request_step2_date(
     await query.edit_message_text(
         text="Принято! ✅\n\nТеперь давай определимся с датой. Напиши в формате *ДД.ММ*, в какой день тебе удобно встретиться (например, *25.12*).",
         reply_markup=back_button_keyboard,
+        parse_mode="Markdown",
     )
     return CHOOSING_DATE
 
@@ -685,7 +686,8 @@ async def create_request_step3_time(
 
     if not re.match(r"^(\d{1,2})\.(\d{1,2})$", user_date_str):
         await update.message.reply_text(
-            "Формат даты неверный 😥. Пожалуйста, введи дату как *ДД.ММ*, например: *25.12* или *1.9*"
+            "Формат даты неверный 😥. Пожалуйста, введи дату как *ДД.ММ*, например: *25.12* или *1.9*",
+            parse_mode="Markdown",
         )
         return CHOOSING_DATE
 
@@ -708,7 +710,8 @@ async def create_request_step3_time(
 
     except ValueError:
         await update.message.reply_text(
-            "Такой даты не существует (например, *31.02*). Пожалуйста, введи корректную дату."
+            "Такой даты не существует (например, *31.02*). Пожалуйста, введи корректную дату.",
+            parse_mode="Markdown",
         )
         return CHOOSING_DATE
 
@@ -724,6 +727,7 @@ async def create_request_step3_time(
     await update.message.reply_text(
         "Отлично! ✅\n\n Теперь давай определимся со временем. Напиши, во сколько тебе удобно встретиться (например, *14:30*).",
         reply_markup=back_button_keyboard,
+        parse_mode="Markdown",
     )
     return CHOOSING_TIME
 

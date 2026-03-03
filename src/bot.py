@@ -2986,6 +2986,9 @@ def main():
             ],
             CHOOSING_REQUEST: [
                 CallbackQueryHandler(handle_accept_request, pattern="^accept_"),
+                CallbackQueryHandler(
+                    create_request_step1_shop, pattern="^create_new_request$"
+                ),
                 CallbackQueryHandler(back_to_main_menu, pattern="^main_menu$"),
             ],
             MANAGING_REQUESTS: [
